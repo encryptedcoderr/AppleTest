@@ -20,7 +20,7 @@ jobs:
     - name: Set up Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
-        xcode-version: '16.0' # Use Xcode 16.0 for iOS 18 SDK
+        xcode-version: '16.1' # Use Xcode 16.1.0, the closest available version to 16.0
 
     # Verify Xcode and clang version
     - name: Verify Xcode and clang version
