@@ -52,13 +52,16 @@ jobs:
 
     # Debug: Verify simulator availability
     - name: Debug simulator availability
-      run: xcrun simctl list devices
+      run: |
+        xcrun simctl list devices
+        xcrun simctl list runtimes
 
     # Ensure iOS runtime and device
     - name: Ensure iOS runtime and device
       run: |
-        xcrun simctl list runtimes
-        xcrun simctl create "iPhone 15" com.apple.CoreSimulator.SimDeviceType.iPhone-15 com.apple.CoreSimulator.SimRuntime.iOS-18-0 || true
+        xcrun simctl create "iPhone 15" com.apple.CoreSimulator.SimDeviceType.iPhone-15 com.apple.CoreSimulator.SimRuntime.iOS-18-1 || true
+        xcrun simctl list devices --json > devices.json
+        cat devices.json
 
     # Boot iOS simulator
     - name: Boot iOS simulator
