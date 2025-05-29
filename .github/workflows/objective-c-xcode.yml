@@ -27,7 +27,7 @@ jobs:
       run: |
         xcodebuild -version
         clang++ --version
-        xcrun --sdk iphoneos --show-sdk-path
+        xcrun --sdk iphonesimulator --show-sdk-path
 
     # Debug: List files in repository
     - name: Debug directory contents
@@ -40,7 +40,7 @@ jobs:
         cat << 'EOF' > build_encodeme.sh
         #!/bin/bash
         set -e
-        clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
+        clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
         chmod +x encodeme
         EOF
         chmod +x build_encodeme.sh
@@ -53,26 +53,27 @@ jobs:
     # Debug: Verify simulator availability
     - name: Debug simulator availability
       run: |
-        xcrun simctl list devices
+        xcrun simctl list devices --json > devices.json
+        cat devices.json
         xcrun simctl list runtimes
 
     # Ensure iOS runtime and device
     - name: Ensure iOS runtime and device
       run: |
         xcrun simctl create "iPhone 15" com.apple.CoreSimulator.SimDeviceType.iPhone-15 com.apple.CoreSimulator.SimRuntime.iOS-18-1 || true
-        xcrun simctl list devices --json > devices.json
-        cat devices.json
+        xcrun simctl bootstatus "iPhone 15" || xcrun simctl boot "iPhone 15" || true
 
     # Boot iOS simulator
     - name: Boot iOS simulator
       run: |
-        xcrun simctl boot "iPhone 15" || true # Ignore if already booted
+        xcrun simctl boot "iPhone 15" || true # Ensure booted
         xcrun simctl status_bar "iPhone 15" override --time "2025-05-29T15:00:00-07:00" --batteryState charged --batteryLevel 100 || true
 
     # Run the binary in simulator
     - name: Run encodeme
       working-directory: apple-positional-audio-codec-invalid-header-main
-      run: xcrun simctl spawn "iPhone 15" ./encodeme
+      run: |
+        xcrun simctl spawn "iPhone 15" ./encodeme || { echo "Spawn failed; check simulator logs"; xcrun simctl spawn "iPhone 15" log stream --level debug --last 1m; exit 1; }
 
     # Verify generated file
     - name: List generated file
