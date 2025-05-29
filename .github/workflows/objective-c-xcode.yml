@@ -54,11 +54,17 @@ jobs:
     - name: Debug simulator availability
       run: xcrun simctl list devices
 
+    # Ensure iOS runtime and device
+    - name: Ensure iOS runtime and device
+      run: |
+        xcrun simctl list runtimes
+        xcrun simctl create "iPhone 15" com.apple.CoreSimulator.SimDeviceType.iPhone-15 com.apple.CoreSimulator.SimRuntime.iOS-18-0 || true
+
     # Boot iOS simulator
     - name: Boot iOS simulator
       run: |
         xcrun simctl boot "iPhone 15" || true # Ignore if already booted
-        xcrun simctl status_bar "iPhone 15" override --time "2025-05-29T15:00:00-0700" --batteryState charged --batteryLevel 100
+        xcrun simctl status_bar "iPhone 15" override --time "2025-05-29T15:00:00-07:00" --batteryState charged --batteryLevel 100 || true
 
     # Run the binary in simulator
     - name: Run encodeme
