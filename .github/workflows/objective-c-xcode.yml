@@ -55,9 +55,10 @@ jobs:
 
       # Debug: List files in repository
       - name: Debug directory contents
+        working-directory: apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Listing directory contents at $(date)"
-          ls -R apple-positional-audio-codec-invalid-header-main
+          ls -l
           echo "Directory listing completed at $(date)"
 
       # Check system resources
@@ -73,23 +74,27 @@ jobs:
         working-directory: apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Creating build script at $(date)"
-          cat << 'EOF' > build_main.sh
+          cat << 'EOF' > build_encodeme.sh
           #!/bin/bash
           set -e
-          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox main.mm -o main
-          chmod +x main
+          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
+          chmod +x encodeme
           EOF
-          chmod +x build_main.sh
+          chmod +x build_encodeme.sh
           echo "Build script created at $(date)"
 
-      # Compile main.mm
-      - name: Compile main.mm
+      # Compile encodeme.mm
+      - name: Compile encodeme.mm
         working-directory: apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Compiling main.mm at $(date)"
-          ./build_main.sh
+          echo "Listing files to be compiled at $(date)"
+          ls -l encodeme.mm build_encodeme.sh || echo "One or more files not found"
+          echo "Compiling encodeme.mm at $(date)"
+          ./build_encodeme.sh
           if [ $? -eq 0 ]; then
             echo "Compilation successful at $(date)"
+            echo "Listing compiled binary at $(date)"
+            ls -l encodeme || echo "Compiled binary 'encodeme' not found"
           else
             echo "Compilation failed at $(date)"
             exit 1
@@ -100,7 +105,7 @@ jobs:
         working-directory: apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Checking for generated file at $(date)"
-          ls -lh sound.m4a || echo "No sound.m4a file found at $(date)"
+          ls -lh output.mp4 || echo "No output.mp4 file found at $(date)"
 
       # Log artifact upload start
       - name: Log artifact upload start
@@ -112,7 +117,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apac-mp4-file
-          path: apple-positional-audio-codec-invalid-header-main/sound.m4a
+          path: apple-positional-audio-codec-invalid-header-main/output.mp4
           retention-days: 7
           if-no-files-found: warn
 
