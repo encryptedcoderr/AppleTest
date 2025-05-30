@@ -28,6 +28,89 @@ jobs:
           ls -l
           echo "Directory listing completed at $(date)"
 
+      # Patch encodeme.mm to remove debugging code
+      - name: Patch encodeme.mm
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Patching encodeme.mm at $(date)"
+          cat > encodeme.mm << 'EOF'
+@import AVFAudio;
+@import AudioToolbox;
+
+int main() {
+  uint32_t channelNum = 1;
+  AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100
+                                                                           channels:channelNum];
+  AudioStreamBasicDescription outputDescription{.mSampleRate = 44100,
+                                                .mFormatID = kAudioFormatAPAC,
+                                                .mFormatFlags = 0,
+                                                .mBytesPerPacket = 0,
+                                                .mFramesPerPacket = 0,
+                                                .mBytesPerFrame = 0,
+                                                .mChannelsPerFrame = channelNum,
+                                                .mBitsPerChannel = 0,
+                                                .mReserved = 0};
+  AVAudioChannelLayout* channelLayout =
+      [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | 1];
+
+  NSURL* outUrl = [NSURL fileURLWithPath:@"output.mp4"];
+
+  OSStatus status = 0;
+
+  ExtAudioFileRef audioFile = nullptr;
+  status =
+      ExtAudioFileCreateWithURL((__bridge CFURLRef)outUrl, kAudioFileMPEG4Type, &outputDescription,
+                                channelLayout.layout, kAudioFileFlags_EraseFile, &audioFile);
+  if (status) {
+    fprintf(stderr, "error creating file: %x\n", status);
+    return 1;
+  }
+
+  status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientDataFormat,
+                                   sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
+  if (status) {
+    fprintf(stderr, "error writing audiofile: %x\n", status);
+    return 1;
+  }
+  status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientChannelLayout,
+                                   sizeof(AudioChannelLayout), formatIn.channelLayout.layout);
+  if (status) {
+    fprintf(stderr, "error writing audiofile: %x\n", status);
+    return 1;
+  }
+  
+  float audioBuffer[44100];
+  for (int i = 0; i < 44100; ++i) {
+      audioBuffer[i] = 0.5f;
+  }
+  AudioBufferList audioBufferList{
+      .mNumberBuffers = 1,
+      .mBuffers =
+          {
+              {
+                  .mNumberChannels = 1,
+                  .mDataByteSize = sizeof(audioBuffer),
+                  .mData = audioBuffer,
+              },
+          },
+  };
+  status =
+      ExtAudioFileWrite(audioFile, sizeof(audioBuffer) / sizeof(audioBuffer[0]), &audioBufferList);
+  if (status) {
+    fprintf(stderr, "error writing audiofile: %x\n", status);
+    return 1;
+  }
+  status = ExtAudioFileDispose(audioFile);
+  if (status) {
+    fprintf(stderr, "error closing audiofile: %x\n", status);
+    return 1;
+  }
+  audioFile = nullptr;
+  return 0;
+}
+EOF
+          echo "encodeme.mm patched at $(date)"
+
       # Log Xcode setup start
       - name: Log Xcode setup start
         run: |
@@ -61,29 +144,27 @@ jobs:
           system_profiler SPHardwareDataType
           echo "System resource check completed at $(date)"
 
-      # Verify encodeme.mm and build_encodeme.sh
-      - name: Verify encodeme.mm and build script
+      # Verify encodeme.mm
+      - name: Verify encodeme.mm
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Verifying files at $(date)"
-          if [ -f "encodeme.mm" ] && [ -f "build_encodeme.sh" ]; then
-            echo "encodeme.mm and build_encodeme.sh found"
-            ls -l encodeme.mm build_encodeme.sh
+          if [ -f "encodeme.mm" ]; then
+            echo "encodeme.mm found"
+            ls -l encodeme.mm
           else
-            echo "One or both of encodeme.mm or build_encodeme.sh not found"
+            echo "encodeme.mm not found"
             ls -l
             exit 1
           fi
           echo "File verification completed at $(date)"
 
-      # Compile encodeme.mm
+      # Compile encodeme.mm for macOS
       - name: Compile encodeme.mm
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Preparing to compile encodeme.mm at $(date)"
-          chmod +x build_encodeme.sh
-          echo "Compiling encodeme.mm at $(date)"
-          ./build_encodeme.sh
+          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
           if [ $? -eq 0 ]; then
             echo "Compilation successful at $(date)"
             echo "Listing compiled binary at $(date)"
