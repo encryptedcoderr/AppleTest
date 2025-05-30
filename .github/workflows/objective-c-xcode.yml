@@ -1,4 +1,4 @@
-name: Generate APAC MP4 File
+name: Generate Audio Files
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
           ls -l
           echo "Directory listing completed at $(date)"
 
-      # Patch encodeme.mm to use AAC codec
+      # Patch encodeme.mm for 10-second M4A and MP3
       - name: Patch encodeme.mm
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
@@ -36,77 +36,165 @@ jobs:
           cat > encodeme.mm << EOF
           @import AVFAudio;
           @import AudioToolbox;
+          #include <cmath>
 
           int main() {
-            uint32_t channelNum = 1;
-            AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100
-                                                                             channels:channelNum];
-            AudioStreamBasicDescription outputDescription{.mSampleRate = 44100,
-                                                          .mFormatID = kAudioFormatMPEG4AAC,
-                                                          .mFormatFlags = 0,
-                                                          .mBytesPerPacket = 0,
-                                                          .mFramesPerPacket = 1024,
-                                                          .mBytesPerFrame = 0,
-                                                          .mChannelsPerFrame = channelNum,
-                                                          .mBitsPerChannel = 0,
-                                                          .mReserved = 0};
-            AVAudioChannelLayout* channelLayout =
-                [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_Mono];
+              uint32_t channelNum = 1;
+              AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100
+                                                                               channels:channelNum];
+              AVAudioChannelLayout* channelLayout =
+                  [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_Mono];
 
-            NSURL* outUrl = [NSURL fileURLWithPath:@"output.mp4"];
+              const int sampleRate = 44100;
+              const int durationSeconds = 10;
+              const int totalSamples = sampleRate * durationSeconds; // 441,000 samples
+              const int samplesPerBuffer = 1024; // Frame size for both AAC and MP3
+              float* audioBuffer = (float*)malloc(samplesPerBuffer * sizeof(float));
 
-            OSStatus status = 0;
+              // --- M4A Output (AAC) ---
+              AudioStreamBasicDescription m4aDescription{
+                  .mSampleRate = 44100,
+                  .mFormatID = kAudioFormatMPEG4AAC,
+                  .mFormatFlags = 0,
+                  .mBytesPerPacket = 0,
+                  .mFramesPerPacket = 1024,
+                  .mBytesPerFrame = 0,
+                  .mChannelsPerFrame = channelNum,
+                  .mBitsPerChannel = 0,
+                  .mReserved = 0
+              };
 
-            ExtAudioFileRef audioFile = nullptr;
-            status =
-                ExtAudioFileCreateWithURL((__bridge CFURLRef)outUrl, kAudioFileMPEG4Type, &outputDescription,
-                                          channelLayout.layout, kAudioFileFlags_EraseFile, &audioFile);
-            if (status) {
-              fprintf(stderr, "error creating file: %x\n", status);
-              return 1;
-            }
+              NSURL* m4aUrl = [NSURL fileURLWithPath:@"output.m4a"];
+              ExtAudioFileRef m4aFile = nullptr;
+              OSStatus status = ExtAudioFileCreateWithURL((__bridge CFURLRef)m4aUrl, kAudioFileM4AType,
+                                                          &m4aDescription, channelLayout.layout,
+                                                          kAudioFileFlags_EraseFile, &m4aFile);
+              if (status) {
+                  fprintf(stderr, "error creating M4A file: %x\n", status);
+                  free(audioBuffer);
+                  return 1;
+              }
 
-            status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientDataFormat,
-                                             sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
-            if (status) {
-              fprintf(stderr, "error writing audiofile: %x\n", status);
-              return 1;
-            }
-            status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientChannelLayout,
-                                             sizeof(AudioChannelLayout), formatIn.channelLayout.layout);
-            if (status) {
-              fprintf(stderr, "error writing audiofile: %x\n", status);
-              return 1;
-            }
+              status = ExtAudioFileSetProperty(m4aFile, kExtAudioFileProperty_ClientDataFormat,
+                                               sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
+              if (status) {
+                  fprintf(stderr, "error setting M4A client format: %x\n", status);
+                  ExtAudioFileDispose(m4aFile);
+                  free(audioBuffer);
+                  return 1;
+              }
+              status = ExtAudioFileSetProperty(m4aFile, kExtAudioFileProperty_ClientChannelLayout,
+                                               sizeof(AudioChannelLayout), formatIn.channelLayout.layout);
+              if (status) {
+                  fprintf(stderr, "error setting M4A channel layout: %x\n", status);
+                  ExtAudioFileDispose(m4aFile);
+                  free(audioBuffer);
+                  return 1;
+              }
 
-            float audioBuffer[44100];
-            for (int i = 0; i < 44100; ++i) {
-                audioBuffer[i] = 0.5f;
-            }
-            AudioBufferList audioBufferList{
-                .mNumberBuffers = 1,
-                .mBuffers =
-                    {
-                        {
-                            .mNumberChannels = 1,
-                            .mDataByteSize = sizeof(audioBuffer),
-                            .mData = audioBuffer,
-                        },
-                    },
-            };
-            status =
-                ExtAudioFileWrite(audioFile, sizeof(audioBuffer) / sizeof(audioBuffer[0]), &audioBufferList);
-            if (status) {
-              fprintf(stderr, "error writing audiofile: %x\n", status);
-              return 1;
-            }
-            status = ExtAudioFileDispose(audioFile);
-            if (status) {
-              fprintf(stderr, "error closing audiofile: %x\n", status);
-              return 1;
-            }
-            audioFile = nullptr;
-            return 0;
+              // --- MP3 Output ---
+              AudioStreamBasicDescription mp3Description{
+                  .mSampleRate = 44100,
+                  .mFormatID = kAudioFormatMPEGLayer3,
+                  .mFormatFlags = 0,
+                  .mBytesPerPacket = 0,
+                  .mFramesPerPacket = 1152, // Standard for MP3
+                  .mBytesPerFrame = 0,
+                  .mChannelsPerFrame = channelNum,
+                  .mBitsPerChannel = 0,
+                  .mReserved = 0
+              };
+
+              NSURL* mp3Url = [NSURL fileURLWithPath:@"output.mp3"];
+              ExtAudioFileRef mp3File = nullptr;
+              status = ExtAudioFileCreateWithURL((__bridge CFURLRef)mp3Url, kAudioFileMP3Type,
+                                                 &mp3Description, channelLayout.layout,
+                                                 kAudioFileFlags_EraseFile, &mp3File);
+              if (status) {
+                  fprintf(stderr, "error creating MP3 file: %x\n", status);
+                  ExtAudioFileDispose(m4aFile);
+                  free(audioBuffer);
+                  return 1;
+              }
+
+              status = ExtAudioFileSetProperty(mp3File, kExtAudioFileProperty_ClientDataFormat,
+                                               sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
+              if (status) {
+                  fprintf(stderr, "error setting MP3 client format: %x\n", status);
+                  ExtAudioFileDispose(m4aFile);
+                  ExtAudioFileDispose(mp3File);
+                  free(audioBuffer);
+                  return 1;
+              }
+              status = ExtAudioFileSetProperty(mp3File, kExtAudioFileProperty_ClientChannelLayout,
+                                               sizeof(AudioChannelLayout), formatIn.channelLayout.layout);
+              if (status) {
+                  fprintf(stderr, "error setting MP3 channel layout: %x\n", status);
+                  ExtAudioFileDispose(m4aFile);
+                  ExtAudioFileDispose(mp3File);
+                  free(audioBuffer);
+                  return 1;
+              }
+
+              // Write audio to both files
+              for (int i = 0; i < totalSamples; i += samplesPerBuffer) {
+                  int samplesToWrite = (i + samplesPerBuffer <= totalSamples) ? samplesPerBuffer : (totalSamples - i);
+
+                  // Generate 440 Hz sine wave
+                  for (int j = 0; j < samplesToWrite; j++) {
+                      audioBuffer[j] = sin(2 * M_PI * 440 * (i + j) / sampleRate) * 0.5f;
+                  }
+
+                  AudioBufferList audioBufferList{
+                      .mNumberBuffers = 1,
+                      .mBuffers = {
+                          {
+                              .mNumberChannels = 1,
+                              .mDataByteSize = samplesToWrite * sizeof(float),
+                              .mData = audioBuffer,
+                          },
+                      },
+                  };
+
+                  // Write to M4A
+                  status = ExtAudioFileWrite(m4aFile, samplesToWrite, &audioBufferList);
+                  if (status) {
+                      fprintf(stderr, "error writing M4A audio: %x\n", status);
+                      ExtAudioFileDispose(m4aFile);
+                      ExtAudioFileDispose(mp3File);
+                      free(audioBuffer);
+                      return 1;
+                  }
+
+                  // Write to MP3
+                  status = ExtAudioFileWrite(mp3File, samplesToWrite, &audioBufferList);
+                  if (status) {
+                      fprintf(stderr, "error writing MP3 audio: %x\n", status);
+                      ExtAudioFileDispose(m4aFile);
+                      ExtAudioFileDispose(mp3File);
+                      free(audioBuffer);
+                      return 1;
+                  }
+              }
+
+              free(audioBuffer);
+
+              // Close M4A file
+              status = ExtAudioFileDispose(m4aFile);
+              if (status) {
+                  fprintf(stderr, "error closing M4A file: %x\n", status);
+                  ExtAudioFileDispose(mp3File);
+                  return 1;
+              }
+
+              // Close MP3 file
+              status = ExtAudioFileDispose(mp3File);
+              if (status) {
+                  fprintf(stderr, "error closing MP3 file: %x\n", status);
+                  return 1;
+              }
+
+              return 0;
           }
           EOF
           echo "encodeme.mm patched at $(date)"
@@ -176,7 +264,7 @@ jobs:
             exit 1
           fi
 
-      # Run encodeme to generate output.mp4
+      # Run encodeme to generate output.m4a and output.mp3
       - name: Run encodeme
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
@@ -190,30 +278,59 @@ jobs:
             exit 1
           fi
 
-      # Verify generated file
-      - name: List generated file
+      # Install FFmpeg for ffprobe
+      - name: Install FFmpeg
+        run: |
+          echo "Installing FFmpeg at $(date)"
+          brew install ffmpeg
+          echo "FFmpeg installed at $(date)"
+
+      # Verify generated files
+      - name: Verify generated files
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Checking for generated file at $(date)"
-          ls -lh output.mp4 || echo "No output.mp4 file found at $(date)"
-          if [ -f "output.mp4" ]; then
-            FILE_SIZE=$(stat -f %z output.mp4 2>/dev/null || stat -c %s output.mp4 2>/dev/null)
-            echo "output.mp4 size: $FILE_SIZE bytes"
+          echo "Checking for generated files at $(date)"
+          ls -lh output.m4a output.mp3 || echo "One or more output files not found at $(date)"
+          if [ -f "output.m4a" ]; then
+            M4A_SIZE=$(stat -f %z output.m4a 2>/dev/null || stat -c %s output.m4a 2>/dev/null)
+            echo "output.m4a size: $M4A_SIZE bytes"
+            if [ "$M4A_SIZE" -eq 0 ]; then
+              echo "Error: output.m4a is 0 bytes"
+              exit 1
+            fi
+            ffprobe -i output.m4a -show_format -show_streams -print_format json || echo "ffprobe failed for output.m4a"
+          else
+            echo "output.m4a not found"
+            exit 1
+          fi
+          if [ -f "output.mp3" ]; then
+            MP3_SIZE=$(stat -f %z output.mp3 2>/dev/null || stat -c %s output.mp3 2>/dev/null)
+            echo "output.mp3 size: $MP3_SIZE bytes"
+            if [ "$MP3_SIZE" -eq 0 ]; then
+              echo "Error: output.mp3 is 0 bytes"
+              exit 1
+            fi
+            ffprobe -i output.mp3 -show_format -show_streams -print_format json || echo "ffprobe failed for output.mp3"
+          else
+            echo "output.mp3 not found"
+            exit 1
           fi
 
       # Log artifact upload start
       - name: Log artifact upload start
         run: |
-          echo "Uploading artifact at $(date)"
+          echo "Uploading artifacts at $(date)"
 
-      # Upload MP4 file as artifact
-      - name: Upload MP4 artifact
+      # Upload M4A and MP3 files as artifacts
+      - name: Upload audio artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: apac-mp4-file
-          path: AppleTest/apple-positional-audio-codec-invalid-header-main/output.mp4
+          name: audio-files
+          path: |
+            AppleTest/apple-positional-audio-codec-invalid-header-main/output.m4a
+            AppleTest/apple-positional-audio-codec-invalid-header-main/output.mp3
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error
 
       # Log artifact upload completion
       - name: Log artifact upload completion
