@@ -12,79 +12,184 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    # Checkout the repository
-    - name: Checkout code
-      uses: actions/checkout@v4
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          path: apple-positional-audio-codec-invalid-header-main
 
-    # Set up specific Xcode version
-    - name: Set up Xcode
-      uses: maxim-lobanov/setup-xcode@v1
-      with:
-        xcode-version: '16.1' # Use Xcode 16.1.0, the closest available version to 16.0
+      # Set up specific Xcode version
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.1' # Use Xcode 16.1, compatible with iOS 18.1
 
-    # Verify Xcode and clang version
-    - name: Verify Xcode and clang version
-      run: |
-        xcodebuild -version
-        clang++ --version
-        xcrun --sdk iphonesimulator --show-sdk-path
+      # Verify Xcode and clang version
+      - name: Verify Xcode and clang version
+        run: |
+          echo "Verifying Xcode and clang versions at $(date)"
+          xcodebuild -version
+          clang++ --version
+          xcrun --sdk iphonesimulator --show-sdk-path
+          echo "Verification completed at $(date)"
 
-    # Debug: List files in repository
-    - name: Debug directory contents
-      run: ls -R apple-positional-audio-codec-invalid-header-main
+      # Debug: List files in repository
+      - name: Debug directory contents
+        run: |
+          echo "Listing directory contents at $(date)"
+          ls -R apple-positional-audio-codec-invalid-header-main
+          echo "Directory listing completed at $(date)"
 
-    # Create build script
-    - name: Create build script
-      working-directory: apple-positional-audio-codec-invalid-header-main
-      run: |
-        cat << 'EOF' > build_encodeme.sh
-        #!/bin/bash
-        set -e
-        clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
-        chmod +x encodeme
-        EOF
-        chmod +x build_encodeme.sh
+      # Cache iOS Simulator Runtime
+      - name: Cache iOS Simulator Runtime
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/CoreSimulator/Profiles/Runtimes
+          key: ios-runtime-${{ runner.os }}-xcode-16.1-ios-18.1
+          restore-keys: ios-runtime-${{ runner.os }}-xcode-16.1
+        run: |
+          echo "Caching iOS simulator runtime at $(date)"
+          echo "Cache setup completed at $(date)"
 
-    # Compile encodeme.mm
-    - name: Compile encodeme.mm
-      working-directory: apple-positional-audio-codec-invalid-header-main
-      run: ./build_encodeme.sh
+      # Install iOS 18.1 Simulator Runtime
+      - name: Install iOS 18.1 Simulator Runtime
+        run: |
+          echo "Checking available runtimes at $(date)"
+          xcrun simctl runtime list
+          if ! xcrun simctl runtime list | grep -q "iOS 18.1"; then
+            echo "iOS 18.1 runtime not found, installing at $(date)"
+            brew install xcodesorg/xcodes/xcodes
+            xcodes runtimes install "iOS 18.1"
+            echo "iOS 18.1 runtime installation completed at $(date)"
+          else
+            echo "iOS 18.1 runtime already installed at $(date)"
+          fi
+          xcrun simctl runtime list
+          echo "Runtime check completed at $(date)"
 
-    # Debug: Verify simulator availability
-    - name: Debug simulator availability
-      run: |
-        xcrun simctl list devices --json > devices.json
-        cat devices.json
-        xcrun simctl list runtimes
+      # Debug: Verify simulator availability
+      - name: Debug simulator availability
+        run: |
+          echo "Listing simulator devices at $(date)"
+          xcrun simctl list devices --json > devices.json
+          cat devices.json
+          echo "Listing runtimes at $(date)"
+          xcrun simctl list runtimes
+          echo "Simulator availability check completed at $(date)"
 
-    # Ensure iOS runtime and device
-    - name: Ensure iOS runtime and device
-      run: |
-        xcrun simctl create "iPhone 15" com.apple.CoreSimulator.SimDeviceType.iPhone-15 com.apple.CoreSimulator.SimRuntime.iOS-18-1 || true
-        xcrun simctl bootstatus "iPhone 15" || xcrun simctl boot "iPhone 15" || true
+      # Create build script
+      - name: Create build script
+        working-directory: apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Creating build script at $(date)"
+          cat << 'EOF' > build_encodeme.sh
+          #!/bin/bash
+          set -e
+          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
+          chmod +x encodeme
+          EOF
+          chmod +x build_encodeme.sh
+          echo "Build script created at $(date)"
 
-    # Boot iOS simulator
-    - name: Boot iOS simulator
-      run: |
-        xcrun simctl boot "iPhone 15" || true # Ensure booted
-        xcrun simctl status_bar "iPhone 15" override --time "2025-05-29T15:00:00-07:00" --batteryState charged --batteryLevel 100 || true
+      # Compile encodeme.mm
+      - name: Compile encodeme.mm
+        working-directory: apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Compiling encodeme.mm at $(date)"
+          ./build_encodeme.sh
+          if [ $? -eq 0 ]; then
+            echo "Compilation successful at $(date)"
+          else
+            echo "Compilation failed at $(date)"
+            exit 1
+          fi
 
-    # Run the binary in simulator
-    - name: Run encodeme
-      working-directory: apple-positional-audio-codec-invalid-header-main
-      run: |
-        xcrun simctl spawn "iPhone 15" ./encodeme || { echo "Spawn failed; check simulator logs"; xcrun simctl spawn "iPhone 15" log stream --level debug --last 1m; exit 1; }
+      # Ensure iOS runtime and device
+      - name: Ensure iOS runtime and device
+        run: |
+          echo "Starting simulator setup at $(date)"
+          echo "Checking system resources"
+          df -h
+          system_profiler SPHardwareDataType
+          
+          echo "Checking if iPhone 15 simulator exists at $(date)"
+          if xcrun simctl list devices | grep -q "iPhone 15"; then
+            echo "iPhone 15 simulator already exists"
+            SIMULATOR_UUID=$(xcrun simctl list devices | grep "iPhone 15" | awk '{print $4}' | head -n 1)
+            echo "Found iPhone 15 simulator with UUID: $SIMULATOR_UUID"
+          else
+            echo "Creating iPhone 15 simulator at $(date)"
+            SIMULATOR_UUID=$(xcrun simctl create "iPhone 15" com.apple.CoreSimulator.SimDeviceType.iPhone-15 com.apple.CoreSimulator.SimRuntime.iOS-18-1)
+            if [ $? -eq 0 ]; then
+              echo "Simulator created successfully with UUID: $SIMULATOR_UUID at $(date)"
+            else
+              echo "Failed to create simulator at $(date)"
+              xcrun simctl spawn "iPhone 15" log stream --level debug --last 1m
+              exit 1
+            fi
+          fi
 
-    # Verify generated file
-    - name: List generated file
-      working-directory: apple-positional-audio-codec-invalid-header-main
-      run: ls -lh sound.m4a || echo "No sound.m4a file found"
+          echo "Checking boot status for iPhone 15 at $(date)"
+          xcrun simctl bootstatus "iPhone 15"
+          if [ $? -eq 0 ]; then
+            echo "Simulator is already booted or ready at $(date)"
+          else
+            echo "Booting iPhone 15 simulator at $(date)"
+            xcrun simctl boot "iPhone 15"
+            if [ $? -eq 0 ]; then
+              echo "Simulator booted successfully at $(date)"
+            else
+              echo "Failed to boot simulator at $(date)"
+              xcrun simctl spawn "iPhone 15" log stream --level debug --last 1m
+              exit 1
+            fi
+          fi
+          echo "Simulator setup completed at $(date)"
 
-    # Upload MP4 file as artifact
-    - name: Upload MP4 artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: apac-mp4-file
-        path: apple-positional-audio-codec-invalid-header-main/sound.m4a
-        retention-days: 7
-        if-no-files-found: warn
+      # Boot iOS simulator (optional, as boot is handled above)
+      - name: Boot iOS simulator
+        run: |
+          echo "Ensuring iPhone 15 simulator is booted at $(date)"
+          xcrun simctl bootstatus "iPhone 15" || xcrun simctl boot "iPhone 15"
+          if [ $? -eq 0 ]; then
+            echo "Simulator boot confirmed at $(date)"
+          else
+            echo "Simulator boot failed at $(date)"
+            xcrun simctl spawn "iPhone 15" log stream --level debug --last 1m
+            exit 1
+          fi
+          xcrun simctl status_bar "iPhone 15" override --time "2025-05-29T15:00:00-07:00" --batteryState charged --batteryLevel 100
+          echo "Simulator status bar configured at $(date)"
+
+      # Run the binary in simulator
+      - name: Run encodeme
+        working-directory: apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Running encodeme at $(date)"
+          xcrun simctl spawn "iPhone 15" ./encodeme
+          if [ $? -eq 0 ]; then
+            echo "encodeme executed successfully at $(date)"
+          else
+            echo "encodeme execution failed at $(date)"
+            xcrun simctl spawn "iPhone 15" log stream --level debug --last 1m
+            exit 1
+          fi
+
+      # Verify generated file
+      - name: List generated file
+        working-directory: apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Checking for generated file at $(date)"
+          ls -lh sound.m4a || echo "No sound.m4a file found at $(date)"
+
+      # Upload MP4 file as artifact
+      - name: Upload MP4 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apac-mp4-file
+          path: apple-positional-audio-codec-invalid-header-main/sound.m4a
+          retention-days: 7
+          if-no-files-found: warn
+        run: |
+          echo "Uploading artifact at $(date)"
+          echo "Artifact upload completed at $(date)"
