@@ -12,7 +12,7 @@ int main() {
     const int sampleRate = 44100;
     const int durationSeconds = 10;
     const int totalSamples = sampleRate * durationSeconds; // 441,000 samples
-    const int samplesPerBuffer = 1024; // Frame size for both AAC and MP3
+    const int samplesPerBuffer = 1024; // Frame size for AAC
     float* audioBuffer = (float*)malloc(samplesPerBuffer * sizeof(float));
 
     // --- M4A Output (AAC) ---
@@ -56,51 +56,7 @@ int main() {
         return 1;
     }
 
-    // --- MP3 Output ---
-    AudioStreamBasicDescription mp3Description{
-        .mSampleRate = 44100,
-        .mFormatID = kAudioFormatMPEGLayer3,
-        .mFormatFlags = 0,
-        .mBytesPerPacket = 0,
-        .mFramesPerPacket = 1152, // Standard for MP3
-        .mBytesPerFrame = 0,
-        .mChannelsPerFrame = channelNum,
-        .mBitsPerChannel = 0,
-        .mReserved = 0
-    };
-
-    NSURL* mp3Url = [NSURL fileURLWithPath:@"output.mp3"];
-    ExtAudioFileRef mp3File = nullptr;
-    status = ExtAudioFileCreateWithURL((__bridge CFURLRef)mp3Url, kAudioFileMP3Type,
-                                       &mp3Description, channelLayout.layout,
-                                       kAudioFileFlags_EraseFile, &mp3File);
-    if (status) {
-        fprintf(stderr, "error creating MP3 file: %x\n", status);
-        ExtAudioFileDispose(m4aFile);
-        free(audioBuffer);
-        return 1;
-    }
-
-    status = ExtAudioFileSetProperty(mp3File, kExtAudioFileProperty_ClientDataFormat,
-                                     sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
-    if (status) {
-        fprintf(stderr, "error setting MP3 client format: %x\n", status);
-        ExtAudioFileDispose(m4aFile);
-        ExtAudioFileDispose(mp3File);
-        free(audioBuffer);
-        return 1;
-    }
-    status = ExtAudioFileSetProperty(mp3File, kExtAudioFileProperty_ClientChannelLayout,
-                                     sizeof(AudioChannelLayout), formatIn.channelLayout.layout);
-    if (status) {
-        fprintf(stderr, "error setting MP3 channel layout: %x\n", status);
-        ExtAudioFileDispose(m4aFile);
-        ExtAudioFileDispose(mp3File);
-        free(audioBuffer);
-        return 1;
-    }
-
-    // Write audio to both files
+    // Write audio to M4A
     for (int i = 0; i < totalSamples; i += samplesPerBuffer) {
         int samplesToWrite = (i + samplesPerBuffer <= totalSamples) ? samplesPerBuffer : (totalSamples - i);
 
@@ -120,22 +76,10 @@ int main() {
             },
         };
 
-        // Write to M4A
         status = ExtAudioFileWrite(m4aFile, samplesToWrite, &audioBufferList);
         if (status) {
             fprintf(stderr, "error writing M4A audio: %x\n", status);
             ExtAudioFileDispose(m4aFile);
-            ExtAudioFileDispose(mp3File);
-            free(audioBuffer);
-            return 1;
-        }
-
-        // Write to MP3
-        status = ExtAudioFileWrite(mp3File, samplesToWrite, &audioBufferList);
-        if (status) {
-            fprintf(stderr, "error writing MP3 audio: %x\n", status);
-            ExtAudioFileDispose(m4aFile);
-            ExtAudioFileDispose(mp3File);
             free(audioBuffer);
             return 1;
         }
@@ -147,14 +91,6 @@ int main() {
     status = ExtAudioFileDispose(m4aFile);
     if (status) {
         fprintf(stderr, "error closing M4A file: %x\n", status);
-        ExtAudioFileDispose(mp3File);
-        return 1;
-    }
-
-    // Close MP3 file
-    status = ExtAudioFileDispose(mp3File);
-    if (status) {
-        fprintf(stderr, "error closing MP3 file: %x\n", status);
         return 1;
     }
 
