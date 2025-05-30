@@ -73,21 +73,21 @@ jobs:
         working-directory: apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Creating build script at $(date)"
-          cat << 'EOF' > build_encodeme.sh
+          cat << 'EOF' > build_main.sh
           #!/bin/bash
           set -e
-          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
-          chmod +x encodeme
+          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox main.mm -o main
+          chmod +x main
           EOF
-          chmod +x build_encodeme.sh
+          chmod +x build_main.sh
           echo "Build script created at $(date)"
 
-      # Compile encodeme.mm
-      - name: Compile encodeme.mm
+      # Compile main.mm
+      - name: Compile main.mm
         working-directory: apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Compiling encodeme.mm at $(date)"
-          ./build_encodeme.sh
+          echo "Compiling main.mm at $(date)"
+          ./build_main.sh
           if [ $? -eq 0 ]; then
             echo "Compilation successful at $(date)"
           else
