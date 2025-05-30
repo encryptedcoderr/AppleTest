@@ -100,15 +100,8 @@ jobs:
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Running encodeme at $(date)"
-          if [ -f "run_encodeme.sh" ]; then
-            echo "Using run_encodeme.sh"
-            chmod +x run_encodeme.sh
-            ./run_encodeme.sh
-          else
-            echo "run_encodeme.sh not found, running encodeme directly"
-            chmod +x encodeme
-            ./encodeme
-          fi
+          chmod +x encodeme
+          ./encodeme
           if [ $? -eq 0 ]; then
             echo "encodeme executed successfully at $(date)"
           else
