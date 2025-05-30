@@ -114,7 +114,7 @@ int main() {
             .mBuffers = {
                 {
                     .mNumberChannels = 1,
-                    .mDataByteSize = samplesToWrite * sizeof(float),
+                    .mDataByteSize = static_cast<UInt32>(samplesToWrite * sizeof(float)),
                     .mData = audioBuffer,
                 },
             },
