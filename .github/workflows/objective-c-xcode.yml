@@ -12,21 +12,21 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      # Log checkout start
-      - name: Log checkout start
+      # Clone the repository
+      - name: Clone repository
         run: |
-          echo "Checking out code at $(date)"
+          echo "Cloning repository at $(date)"
+          git clone https://github.com/encryptedcoderr/AppleTest/
+          echo "Repository cloned at $(date)"
 
-      # Checkout the repository
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          path: apple-positional-audio-codec-invalid-header-main
-
-      # Log checkout completion
-      - name: Log checkout completion
+      # Navigate and list directory contents
+      - name: Navigate and list directory contents
         run: |
-          echo "Checkout completed at $(date)"
+          echo "Navigating to directory at $(date)"
+          cd AppleTest/apple-positional-audio-codec-invalid-header-main
+          echo "Listing directory contents at $(date)"
+          ls -l
+          echo "Directory listing completed at $(date)"
 
       # Log Xcode setup start
       - name: Log Xcode setup start
@@ -53,14 +53,6 @@ jobs:
           xcrun --sdk macosx --show-sdk-path
           echo "Verification completed at $(date)"
 
-      # Debug: List files in repository
-      - name: Debug directory contents
-        working-directory: apple-positional-audio-codec-invalid-header-main
-        run: |
-          echo "Listing directory contents at $(date)"
-          ls -l
-          echo "Directory listing completed at $(date)"
-
       # Check system resources
       - name: Check system resources
         run: |
@@ -69,26 +61,27 @@ jobs:
           system_profiler SPHardwareDataType
           echo "System resource check completed at $(date)"
 
-      # Create build script
-      - name: Create build script
-        working-directory: apple-positional-audio-codec-invalid-header-main
+      # Verify encodeme.mm and build_encodeme.sh
+      - name: Verify encodeme.mm and build script
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Creating build script at $(date)"
-          cat << 'EOF' > build_encodeme.sh
-          #!/bin/bash
-          set -e
-          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch x86_64 -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
-          chmod +x encodeme
-          EOF
-          chmod +x build_encodeme.sh
-          echo "Build script created at $(date)"
+          echo "Verifying files at $(date)"
+          if [ -f "encodeme.mm" ] && [ -f "build_encodeme.sh" ]; then
+            echo "encodeme.mm and build_encodeme.sh found"
+            ls -l encodeme.mm build_encodeme.sh
+          else
+            echo "One or both of encodeme.mm or build_encodeme.sh not found"
+            ls -l
+            exit 1
+          fi
+          echo "File verification completed at $(date)"
 
       # Compile encodeme.mm
       - name: Compile encodeme.mm
-        working-directory: apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Listing files to be compiled at $(date)"
-          ls -l encodeme.mm build_encodeme.sh || echo "One or more files not found"
+          echo "Preparing to compile encodeme.mm at $(date)"
+          chmod +x build_encodeme.sh
           echo "Compiling encodeme.mm at $(date)"
           ./build_encodeme.sh
           if [ $? -eq 0 ]; then
@@ -102,7 +95,7 @@ jobs:
 
       # Verify generated file
       - name: List generated file
-        working-directory: apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Checking for generated file at $(date)"
           ls -lh output.mp4 || echo "No output.mp4 file found at $(date)"
@@ -117,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apac-mp4-file
-          path: apple-positional-audio-codec-invalid-header-main/output.mp4
+          path: AppleTest/apple-positional-audio-codec-invalid-header-main/output.mp4
           retention-days: 7
           if-no-files-found: warn
 
