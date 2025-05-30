@@ -28,7 +28,7 @@ jobs:
           ls -l
           echo "Directory listing completed at $(date)"
 
-      # Patch encodeme.mm to remove debugging code
+      # Patch encodeme.mm to use AAC codec
       - name: Patch encodeme.mm
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
@@ -42,16 +42,16 @@ jobs:
             AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100
                                                                              channels:channelNum];
             AudioStreamBasicDescription outputDescription{.mSampleRate = 44100,
-                                                          .mFormatID = kAudioFormatAPAC,
+                                                          .mFormatID = kAudioFormatMPEG4AAC,
                                                           .mFormatFlags = 0,
                                                           .mBytesPerPacket = 0,
-                                                          .mFramesPerPacket = 0,
+                                                          .mFramesPerPacket = 1024,
                                                           .mBytesPerFrame = 0,
                                                           .mChannelsPerFrame = channelNum,
                                                           .mBitsPerChannel = 0,
                                                           .mReserved = 0};
             AVAudioChannelLayout* channelLayout =
-                [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | 1];
+                [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_Mono];
 
             NSURL* outUrl = [NSURL fileURLWithPath:@"output.mp4"];
 
