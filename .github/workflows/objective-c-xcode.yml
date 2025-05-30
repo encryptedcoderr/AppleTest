@@ -88,8 +88,31 @@ jobs:
             echo "Compilation successful at $(date)"
             echo "Listing compiled binary at $(date)"
             ls -l encodeme || echo "Compiled binary 'encodeme' not found"
+            BINARY_SIZE=$(stat -f %z encodeme 2>/dev/null || stat -c %s encodeme 2>/dev/null)
+            echo "Binary size: $BINARY_SIZE bytes"
           else
             echo "Compilation failed at $(date)"
+            exit 1
+          fi
+
+      # Run encodeme to generate output.mp4
+      - name: Run encodeme
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Running encodeme at $(date)"
+          if [ -f "run_encodeme.sh" ]; then
+            echo "Using run_encodeme.sh"
+            chmod +x run_encodeme.sh
+            ./run_encodeme.sh
+          else
+            echo "run_encodeme.sh not found, running encodeme directly"
+            chmod +x encodeme
+            ./encodeme
+          fi
+          if [ $? -eq 0 ]; then
+            echo "encodeme executed successfully at $(date)"
+          else
+            echo "encodeme execution failed at $(date)"
             exit 1
           fi
 
@@ -99,6 +122,10 @@ jobs:
         run: |
           echo "Checking for generated file at $(date)"
           ls -lh output.mp4 || echo "No output.mp4 file found at $(date)"
+          if [ -f "output.mp4" ]; then
+            FILE_SIZE=$(stat -f %z output.mp4 2>/dev/null || stat -c %s output.mp4 2>/dev/null)
+            echo "output.mp4 size: $FILE_SIZE bytes"
+          fi
 
       # Log artifact upload start
       - name: Log artifact upload start
