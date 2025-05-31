@@ -29,11 +29,11 @@ jobs:
           echo "Directory listing completed at $(date)"
 
       # Copy poc_variation3.mm to the working directory
-      - name: Ensure poc_variation3.mm exists
+      - name: Ensure encodeme3.mm exists
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Copying or verifying poc_variation3.mm at $(date)"
-          if [ ! -f "poc_variation3.mm" ]; then
+          if [ ! -f "encodeme.mm" ]; then
             echo "Error: poc_variation3.mm not found"
             ls -l
             exit 1
