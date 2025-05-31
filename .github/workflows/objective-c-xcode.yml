@@ -28,18 +28,19 @@ jobs:
           ls -l
           echo "Directory listing completed at $(date)"
 
-      # Copy poc_variation3.mm to the working directory
-      - name: Ensure encodeme3.mm exists
+      # Ensure encodeme.mm exists
+      - name: Ensure encodeme.mm exists
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Copying or verifying poc_variation3.mm at $(date)"
-          if [ ! -f "encodeme.mm" ]; then
-            echo "Error: poc_variation3.mm not found"
+          echo "Copying or verifying encodeme.mm at $(date)"
+          if [ -f "encodeme.mm" ]; then
+            echo "encodeme.mm found"
+            ls -l encodeme.mm
+          else
+            echo "encodeme.mm not found"
             ls -l
             exit 1
           fi
-          echo "poc_variation3.mm found"
-          ls -l poc_variation3.mm
           echo "File verification completed at $(date)"
 
       # Log Xcode setup start
@@ -75,34 +76,34 @@ jobs:
           system_profiler SPHardwareDataType
           echo "System resource check completed at $(date)"
 
-      # Compile poc_variation3.mm for iPhoneOS
-      - name: Compile poc_variation3.mm
+      # Compile encodeme.mm for iPhoneOS
+      - name: Compile encodeme.mm
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Preparing to compile poc_variation3.mm at $(date)"
-          clang++ -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -framework AVFAudio -framework AudioToolbox -std=c++11 poc_variation3.mm -o poc_variation3
+          echo "Preparing to compile encodeme.mm at $(date)"
+          clang++ -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -framework AVFAudio -framework AudioToolbox -std=c++11 encodeme.mm -o encodeme
           if [ $? -eq 0 ]; then
             echo "Compilation successful at $(date)"
             echo "Listing compiled binary at $(date)"
-            ls -l poc_variation3 || echo "Compiled binary 'poc_variation3' not found"
-            BINARY_SIZE=$(stat -f %z poc_variation3 2>/dev/null || stat -c %s poc_variation3 2>/dev/null)
+            ls -l encodeme || echo "Compiled binary 'encodeme' not found"
+            BINARY_SIZE=$(stat -f %z encodeme 2>/dev/null || stat -c %s encodeme 2>/dev/null)
             echo "Binary size: $BINARY_SIZE bytes"
           else
             echo "Compilation failed at $(date)"
             exit 1
           fi
 
-      # Run poc_variation3 to generate output_<sampleRate>_<formatID>.mp4 files
-      - name: Run poc_variation3
+      # Run encodeme to generate output.m4a
+      - name: Run encodeme
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Running poc_variation3 at $(date)"
-          chmod +x poc_variation3
-          ./poc_variation3
+          echo "Running encodeme at $(date)"
+          chmod +x encodeme
+          ./encodeme
           if [ $? -eq 0 ]; then
-            echo "poc_variation3 executed successfully at $(date)"
+            echo "encodeme executed successfully at $(date)"
           else
-            echo "poc_variation3 execution failed at $(date)"
+            echo "encodeme execution failed at $(date)"
             exit 1
           fi
 
@@ -113,74 +114,63 @@ jobs:
           brew install ffmpeg
           echo "FFmpeg installed at $(date)"
 
-      # Convert generated MP4 files to MP3
-      - name: Convert MP4 to MP3
+      # Convert M4A to MP3
+      - name: Convert M4A to MP3
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Converting MP4 files to MP3 at $(date)"
-          for file in output_*.mp4; do
-            if [ -f "$file" ]; then
-              output_mp3="${file%.mp4}.mp3"
-              ffmpeg -i "$file" -c:a mp3 -b:a 128k -ac 1 "$output_mp3"
-              if [ $? -eq 0 ]; then
-                echo "Converted $file to $output_mp3 successfully"
-              else
-                echo "Conversion failed for $file"
-                exit 1
-              fi
-            else
-              echo "No MP4 files found"
-              exit 1
-            fi
-          done
-          echo "Conversion completed at $(date)"
+          echo "Converting output.m4a to output.mp3 at $(date)"
+          ffmpeg -i output.m4a -c:a mp3 -b:a 128k -ac 1 output.mp3
+          if [ $? -eq 0 ]; then
+            echo "Conversion successful at $(date)"
+          else
+            echo "Conversion failed at $(date)"
+            exit 1
+          fi
 
       # Verify generated files
       - name: Verify generated files
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Checking for generated files at $(date)"
-          ls -lh output_*.mp4 output_*.mp3 || echo "One or more output files not found at $(date)"
-          for file in output_*.mp4; do
-            if [ -f "$file" ]; then
-              FILE_SIZE=$(stat -f %z "$file" 2>/dev/null || stat -c %s "$file" 2>/dev/null)
-              echo "$file size: $FILE_SIZE bytes"
-              if [ "$FILE_SIZE" -eq 0 ]; then
-                echo "Error: $file is 0 bytes"
-                exit 1
-              fi
-              ffprobe -i "$file" -show_format -show_streams -print_format json || echo "ffprobe failed for $file"
-            else
-              echo "No MP4 files found"
+          ls -lh output.m4a output.mp3 || echo "One or more output files not found at $(date)"
+          if [ -f "output.m4a" ]; then
+            M4A_SIZE=$(stat -f %z output.m4a 2>/dev/null || stat -c %s output.m4a 2>/dev/null)
+            echo "output.m4a size: $M4A_SIZE bytes"
+            if [ "$M4A_SIZE" -eq 0 ]; then
+              echo "Error: output.m4a is 0 bytes"
               exit 1
             fi
-          done
-          for file in output_*.mp3; do
-            if [ -f "$file" ]; then
-              FILE_SIZE=$(stat -f %z "$file" 2>/dev/null || stat -c %s "$file" 2>/dev/null)
-              echo "$file size: $FILE_SIZE bytes"
-              if [ "$FILE_SIZE" -eq 0 ]; then
-                echo "Error: $file is 0 bytes"
-                exit 1
-              fi
-              ffprobe -i "$file" -show_format -show_streams -print_format json || echo "ffprobe failed for $file"
+            ffprobe -i output.m4a -show_format -show_streams -print_format json || echo "ffprobe failed for output.m4a"
+          else
+            echo "output.m4a not found"
+            exit 1
+          fi
+          if [ -f "output.mp3" ]; then
+            MP3_SIZE=$(stat -f %z output.mp3 2>/dev/null || stat -c %s output.mp3 2>/dev/null)
+            echo "output.mp3 size: $MP3_SIZE bytes"
+            if [ "$MP3_SIZE" -eq 0 ]; then
+              echo "Error: output.mp3 is 0 bytes"
+              exit 1
             fi
-          done
-          echo "File verification completed at $(date)"
+            ffprobe -i output.mp3 -show_format -show_streams -print_format json || echo "ffprobe failed for output.mp3"
+          else
+            echo "output.mp3 not found"
+            exit 1
+          fi
 
       # Log artifact upload start
       - name: Log artifact upload start
         run: |
           echo "Uploading artifacts at $(date)"
 
-      # Upload MP4 and MP3 files as artifacts
+      # Upload M4A and MP3 files as artifacts
       - name: Upload audio artifacts
         uses: actions/upload-artifact@v4
         with:
           name: audio-files
           path: |
-            AppleTest/apple-positional-audio-codec-invalid-header-main/output_*.mp4
-            AppleTest/apple-positional-audio-codec-invalid-header-main/output_*.mp3
+            AppleTest/apple-positional-audio-codec-invalid-header-main/output.m4a
+            AppleTest/apple-positional-audio-codec-invalid-header-main/output.mp3
           retention-days: 7
           if-no-files-found: error
 
