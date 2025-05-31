@@ -86,7 +86,7 @@ jobs:
             echo "Compilation successful at $(date)"
             echo "Listing compiled binary at $(date)"
             ls -l encodeme || echo "Compiled binary 'encodeme' not found"
-            BINARY_SIZE=$(stat -f %z encodeme 2>/dev/null || stat -c %s(encodeme 2>/dev/null)
+            BINARY_SIZE=$(stat -f %z encodeme 2>/dev/null || stat -c %s encodeme 2>/dev/null)
             echo "Binary size: $BINARY_SIZE bytes"
           else
             echo "Compilation failed at $(date)"
