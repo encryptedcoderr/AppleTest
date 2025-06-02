@@ -194,9 +194,9 @@ void audioQueueCallback(void *userData, AudioQueueRef queue, AudioQueueBufferRef
         time_t now = time(NULL);
         fprintf(logFile, "AudioQueue callback at %s", ctime(&now));
     }
-    NSMutableData *fuzzed = generateFuzzedBuffer(buffer->mAudioDataBytesCapacity);
-    buffer->mAudioDataByteSize = fuzzed.length;
-    memcpy(buffer->mAudioData, fuzzed.bytes, fuzzed.length);
+    NSMutableData *fuzzedData = generateFuzzedBuffer(buffer->mAudioDataByteSize);
+    buffer->mAudioDataByteSize = fuzzedData.length;
+    memcpy(buffer->mAudioData, fuzzedData.bytes, fuzzedData.length);
 
     AudioStreamPacketDescription *packets = NULL;
     UInt32 numPackets = rand() % 5;
@@ -227,7 +227,7 @@ void audioQueueCallback(void *userData, AudioQueueRef queue, AudioQueueBufferRef
 void fuzzAudioQueue(AudioQueueRef queue) {
     FILE* logFile = fopen("fuzzer_detail.log", "a");
     AudioQueueParameterID param = kAudioQueueParam_PlayRate;
-    AudioQueueParameterValue rate = ((float)(rand() % 200 - 50) / 100.0f);
+    AudioQueueParameterValue rate = ((float)((int)rand() % 200 - 50)) / 50.0f;
     if (logFile) {
         time_t now = time(NULL);
         fprintf(logFile, "Setting play rate: %f at %s", rate, ctime(&now));
@@ -238,7 +238,7 @@ void fuzzAudioQueue(AudioQueueRef queue) {
 
 void fuzzAVAudioPlayer(AVAudioPlayer *player) {
     FILE* logFile = fopen("fuzzer_detail.log", "a");
-    float rate = ((float)(rand() % 200 - 50) / 100.0f);
+    float rate = ((float)((int)rand() % 200 - 50)) / 100.0f;
     if (logFile) {
         time_t now = time(NULL);
         fprintf(logFile, "Fuzzed rate: %f at %s", rate, ctime(&now));
@@ -246,7 +246,7 @@ void fuzzAVAudioPlayer(AVAudioPlayer *player) {
     fprintf(stderr, "-> Fuzzed rate: %f\n", rate);
     player.rate = rate;
 
-    NSTimeInterval time = ((double)(rand() % 500) / 100.0);
+    NSTimeInterval time = ((double)(rand() % 500)) / 100.0;
     if (logFile) {
         fprintf(logFile, "Fuzzed time: %f\n", time);
     }
