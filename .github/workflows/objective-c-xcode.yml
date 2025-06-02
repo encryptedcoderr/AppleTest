@@ -130,7 +130,7 @@ jobs:
           echo "Patching fuzzer.mm at $(date)"
           cat > fuzzer.mm << 'EOF'
           #import <Foundation/Foundation.h>
-          #import <AVFoundation/AVFoundation.h>
+          #import <AVFAudio/AVFAudio.h>
           #import <AudioToolbox/AudioToolbox.h>
           #include <vector>
           #include <random>
@@ -140,13 +140,13 @@ jobs:
           #include <time.h>
           #include <fcntl.h>
           #include <unistd.h>
-          
+
           struct CodecConfig {
               char padding0[0x78];
               AudioChannelLayout* remappingChannelLayout;
               char padding1[0xe0 - 0x80];
               std::vector<char> mRemappingArray;
-          
+
               CodecConfig() : remappingChannelLayout(nullptr) {}
               ~CodecConfig() {
                   if (remappingChannelLayout) {
@@ -154,19 +154,19 @@ jobs:
                   }
               }
           };
-          
+
           void OverrideApac(CodecConfig* config) {
               if (config->remappingChannelLayout) {
                   config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8;
               }
               config->mRemappingArray.resize(0x10000, 0xff);
           }
-          
+
           void handleCrash(int sig) {
               fprintf(stderr, "Crash detected: Signal %d\n", sig);
               exit(1);
           }
-          
+
           NSString* generateFuzzedAudio(NSString* inputPath, bool isMP3) {
               std::vector<double> sampleRates = {8000, 16000, 44100, 48000, 96000};
               std::vector<AudioFormatID> formats = {kAudioFormatMPEG4AAC, kAudioFormatLinearPCM, kAudioFormatMPEG4AAC};
@@ -174,11 +174,11 @@ jobs:
               std::mt19937 gen(rd());
               std::uniform_int_distribution<> formatDist(0, formats.size() - 1);
               std::uniform_int_distribution<> rateDist(0, sampleRates.size() - 1);
-          
+
               double sampleRate = sampleRates[rateDist(gen)];
               AudioFormatID formatID = formats[formatDist(gen)];
               uint32_t channelNum = 1 + (rand() % 2);
-          
+
               AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:channelNum];
               AudioStreamBasicDescription outputDesc = {
                   .mSampleRate = sampleRate,
@@ -191,7 +191,7 @@ jobs:
                   .mBitsPerChannel = 0,
                   .mReserved = 0
               };
-          
+
               AVAudioChannelLayout* channelLayout = [[AVAudioChannelLayout alloc] initWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | (rand() % 8)];
               CodecConfig config;
               AudioChannelLayout* layoutCopy = (AudioChannelLayout*)malloc(sizeof(AudioChannelLayout));
@@ -202,11 +202,11 @@ jobs:
               memcpy(layoutCopy, channelLayout.layout, sizeof(AudioChannelLayout));
               config.remappingChannelLayout = layoutCopy;
               OverrideApac(&config);
-          
+
               NSString* fileName = [NSString stringWithFormat:@"fuzzed_%.0f_%u.%@", sampleRate, formatID, isMP3 ? @"mp3" : @"m4a"];
               NSString* tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
               NSURL* outUrl = [NSURL fileURLWithPath:tempPath];
-          
+
               ExtAudioFileRef audioFile = nullptr;
               OSStatus status = ExtAudioFileCreateWithURL((__bridge CFURLRef)outUrl,
                                                          isMP3 ? kAudioFileMP3Type : kAudioFileMPEG4Type,
@@ -217,7 +217,7 @@ jobs:
                   free(layoutCopy);
                   return nil;
               }
-          
+
               status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientDataFormat,
                                                sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
               if (status) {
@@ -226,7 +226,7 @@ jobs:
                   free(layoutCopy);
                   return nil;
               }
-          
+
               status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientChannelLayout,
                                                sizeof(AudioChannelLayout), formatIn.channelLayout.layout);
               if (status) {
@@ -235,7 +235,7 @@ jobs:
                   free(layoutCopy);
                   return nil;
               }
-          
+
               float audioBuffer[44100];
               std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
               for (int i = 0; i < 44100; ++i) {
@@ -249,34 +249,34 @@ jobs:
               if (status) {
                   fprintf(stderr, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
               }
-          
+
               ExtAudioFileDispose(audioFile);
               free(layoutCopy);
               return tempPath;
           }
-          
+
           NSMutableData* generateFuzzedBuffer(NSUInteger len) {
               NSMutableData *buffer = [NSMutableData dataWithLength:len];
               uint8_t *bytes = (uint8_t *)buffer.mutableBytes;
-          
+
               for (NSUInteger i = 0; i < len; i++) {
                   bytes[i] = rand() % 256;
               }
-          
+
               int mutations = rand() % 10 + 5;
               for (int i = 0; i < mutations; i++) {
                   NSUInteger offset = rand() % len;
                   bytes[offset] = (rand() % 2) ? 0x00 : 0xFF;
               }
-          
+
               return buffer;
           }
-          
+
           void audioQueueCallback(void *userData, AudioQueueRef queue, AudioQueueBufferRef buffer) {
               NSMutableData *fuzzed = generateFuzzedBuffer(buffer->mAudioDataBytesCapacity);
               buffer->mAudioDataByteSize = fuzzed.length;
               memcpy(buffer->mAudioData, fuzzed.bytes, fuzzed.length);
-          
+
               AudioStreamPacketDescription *packets = NULL;
               UInt32 numPackets = rand() % 10;
               if (numPackets) {
@@ -287,87 +287,67 @@ jobs:
                       packets[i].mVariableFramesInPacket = rand() % 10;
                   }
               }
-          
+
               OSStatus status = AudioQueueEnqueueBuffer(queue, buffer, numPackets, packets);
               if (status != noErr) {
                   fprintf(stderr, "Enqueue failed: %d\n", (int)status);
               }
-          
+
               free(packets);
           }
-          
+
           void fuzzAudioQueue(AudioQueueRef queue) {
-              AudioQueueTimelineRef timeline;
-              if (AudioQueueCreateTimeline(queue, &timeline) == noErr) {
-                  AudioTimeStamp time = { .mSampleTime = (Float64)(rand() % 100000), .mFlags = kAudioTimeStampSampleTimeValid };
-                  AudioQueueSetTimelineDiscontinuity(queue, timeline, &time);
-                  AudioQueueDisposeTimeline(queue, timeline);
-              }
-          
               AudioQueueParameterID param = kAudioQueueParam_PlayRate;
               AudioQueueParameterValue rate = ((float)(rand() % 400 - 100) / 100.0f);
               AudioQueueSetParameter(queue, param, rate);
           }
-          
+
           void fuzzAVAudioPlayer(AVAudioPlayer *player) {
               float rate = ((float)(rand() % 400 - 100) / 100.0f);
               player.rate = rate;
               fprintf(stderr, "-> Fuzzed rate: %f\n", rate);
-          
+
               NSTimeInterval time = ((double)(rand() % 1000) / 100.0);
               player.currentTime = time;
               fprintf(stderr, "-> Fuzzed time: %f\n", time);
-          
+
               if (rand() % 2) {
                   [player play];
                   usleep(rand() % 50000);
                   [player stop];
               }
           }
-          
+
           void fuzzMediaToolbox(NSString *path, NSError **err) {
               fprintf(stderr, "MediaToolbox fuzzing requires headers\n");
           }
-          
+
           int main(int argc, char *argv[]) {
               @autoreleasepool {
                   signal(SIGSEGV, handleCrash);
                   signal(SIGABRT, handleCrash);
                   signal(SIGILL, handleCrash);
-          
+
                   NSString *inputPath = @"output.m4a";
                   if (argc > 1) {
                       inputPath = @(argv[1]);
                   }
-          
-                  int iterations = 10; // Reduced for CI to avoid excessive runtime
+
+                  int iterations = 10; // Reduced for CI
                   if (argc > 2) {
                       iterations = atoi(argv[2]);
                   }
-          
-                  NSError *error;
-                  AVAudioSession *session = [AVAudioSession sharedInstance];
-                  [session setCategory:AVAudioSessionCategoryPlayback error:&error];
-                  if (error) {
-                      fprintf(stderr, "Session category error: %s\n", error.localizedDescription.UTF8String);
-                      return 1;
-                  }
-                  [session setActive:YES error:&error];
-                  if (error) {
-                      fprintf(stderr, "Session activation failed: %s\n", error.localizedDescription.UTF8String);
-                      return 1;
-                  }
-          
+
                   for (int i = 0; i < iterations; i++) {
                       fprintf(stderr, "Iteration %d/%d\n", i + 1, iterations);
-          
+
                       bool isMP3 = rand() % 2;
                       NSString *tempPath = generateFuzzedAudio(inputPath, isMP3);
                       if (!tempPath) {
                           continue;
                       }
-          
-                      AVAudioPlayer *player = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:tempPath] error:&error];
+
+                      AVAudioPlayer *player = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:tempPath] error:nil];
                       if (player) {
                           player.enableRate = YES;
                           fuzzAVAudioPlayer(player);
@@ -375,9 +355,9 @@ jobs:
                           usleep(rand() % 100000);
                           [player stop];
                       } else {
-                          fprintf(stderr, "Player init failed: %s\n", error.localizedDescription.UTF8String);
+                          fprintf(stderr, "Player init failed for %s\n", tempPath.UTF8String);
                       }
-          
+
                       AudioStreamBasicDescription desc = {
                           .mSampleRate = 44100,
                           .mFormatID = kAudioFormatLinearPCM,
@@ -394,7 +374,7 @@ jobs:
                           fprintf(stderr, "Queue creation failed: %d\n", (int)status);
                           continue;
                       }
-          
+
                       for (int j = 0; j < 5; j++) {
                           AudioQueueBufferRef buffer;
                           UInt32 size = rand() % 200000 + 1000;
@@ -402,21 +382,20 @@ jobs:
                               audioQueueCallback(NULL, queue, buffer);
                           }
                       }
-          
+
                       fuzzAudioQueue(queue);
                       AudioQueueStart(queue, NULL);
                       usleep(rand() % 100000);
                       AudioQueueStop(queue, true);
                       AudioQueueDispose(queue, true);
-          
-                      fuzzMediaToolbox(tempPath, &error);
-          
+
+                      fuzzMediaToolbox(tempPath, nil);
+
                       [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
-          
+
                       fprintf(stderr, "Completed iteration %d\n", i + 1);
                   }
-          
-                  [session setActive:NO error:nil];
+
                   fprintf(stderr, "Fuzzing completed\n");
               }
               return 0;
@@ -457,7 +436,7 @@ jobs:
           system_profiler SPHardwareDataType
           echo "System resource check completed at $(date)"
 
-      # Verify encodeme.mm and fuzzer.mm
+      # Verify source files
       - name: Verify source files
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
@@ -612,7 +591,7 @@ jobs:
             /tmp/fuzzed_*.m4a
             /tmp/fuzzed_*.mp3
           retention-days: 7
-          if-no-files-found: warn # Changed to warn to avoid failure if no fuzzed files are generated
+          if-no-files-found: warn # Avoid failure if no fuzzed files are generated
 
       # Log artifact upload completion
       - name: Log artifact upload completion
