@@ -19,52 +19,56 @@ struct CodecConfig {
 
 void OverrideApac(CodecConfig* config) {
   if (config->remappingChannelLayout) {
-    config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8;
+    config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3; // Order 1, 4 channels
   }
-  config->mRemappingArray.resize(0x10000, 0xff);
+  config->mRemappingArray.resize(1024, 0xff); // Moderate size for fuzzing
 }
 
 int main() {
-  std::vector<double> sampleRates = {8000, 16000, 44100, 48000, 96000};
-  std::vector<AudioFormatID> formats = {kAudioFormatMPEG4AAC, kAudioFormatLinearPCM, kAudioFormatMPEG4AAC};
+  std::vector<double> sampleRates = {16000, 44100, 48000, 96000}; // Skip 8000 Hz for AAC
+  std::vector<AudioFormatID> formats = {kAudioFormatMPEG4AAC, kAudioFormatLinearPCM};
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<> formatDist(0, formats.size() - 1);
 
   for (double sampleRate : sampleRates) {
     AudioFormatID formatID = formats[formatDist(gen)];
-    uint32_t channelNum = 1;
+    if (formatID == kAudioFormatMPEG4AAC && sampleRate < 16000) {
+      fprintf(stderr, "Skipping unsupported sample rate %.0f for AAC\n", sampleRate);
+      continue;
+    }
+    uint32_t channelNum = 4; // 4 channels for HOA order 1
     AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate
                                                                              channels:channelNum];
     AudioStreamBasicDescription outputDescription = {
         .mSampleRate = sampleRate,
         .mFormatID = formatID,
-        .mFormatFlags = (formatID == kAudioFormatLinearPCM) ? kAudioFormatFlagIsFloat : 0,
-        .mBytesPerPacket = 0,
-        .mFramesPerPacket = 0,
-        .mBytesPerFrame = 0,
+        .mFormatFlags = (formatID == kAudioFormatLinearPCM) ? kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked : 0,
+        .mBytesPerPacket = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : 0,
+        .mFramesPerPacket = (formatID == kAudioFormatMPEG4AAC) ? 1024 : 1,
+        .mBytesPerFrame = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : 0,
         .mChannelsPerFrame = channelNum,
-        .mBitsPerChannel = 0,
-        .mReserved = 0};
+        .mBitsPerChannel = (formatID == kAudioFormatLinearPCM) ? 32 : 0,
+        .mReserved = 0
+    };
 
-    AVAudioChannelLayout* channelLayout =
-        [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | 1];
+    AVAudioChannelLayout* channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3];
 
     CodecConfig config;
-    AudioChannelLayout* channelLayoutCopy = (AudioChannelLayout*)malloc(sizeof(AudioChannelLayout));
+    AudioChannelLayout* channelLayoutCopy = (AudioChannelLayout*)malloc(sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * channelNum);
     if (!channelLayoutCopy) {
       fprintf(stderr, "Memory allocation failed for sample rate %.0f\n", sampleRate);
       continue;
     }
-    memcpy(channelLayoutCopy, channelLayout.layout, sizeof(AudioChannelLayout));
+    memcpy(channelLayoutCopy, channelLayout.layout, sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * channelNum);
     config.remappingChannelLayout = channelLayoutCopy;
 
     OverrideApac(&config);
 
-    NSString* fileName = [NSString stringWithFormat:@"output_%.0f_%u.mp4", sampleRate, formatID];
+    NSString* fileName = [NSString stringWithFormat:@"output_%.0f_%u.m4a", sampleRate, formatID];
     NSURL* outUrl = [NSURL fileURLWithPath:fileName];
     ExtAudioFileRef audioFile = nullptr;
-    OSStatus status = ExtAudioFileCreateWithURL((__bridge CFURLRef)outUrl, kAudioFileMPEG4Type,
+    OSStatus status = ExtAudioFileCreateWithURL((__bridge CFURLRef)outUrl, kAudioFileM4AType,
                                                 &outputDescription, config.remappingChannelLayout,
                                                 kAudioFileFlags_EraseFile, &audioFile);
     if (status) {
@@ -83,7 +87,7 @@ int main() {
     }
 
     status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientChannelLayout,
-                                     sizeof(AudioChannelLayout), formatIn.channelLayout.layout);
+                                     sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * channelNum, formatIn.channelLayout.layout);
     if (status) {
       fprintf(stderr, "Error setting layout (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
       ExtAudioFileDispose(audioFile);
@@ -91,16 +95,16 @@ int main() {
       continue;
     }
 
-    float audioBuffer[44100];
+    float audioBuffer[44100 * channelNum];
     std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
-    for (int i = 0; i < 44100; ++i) {
+    for (int i = 0; i < 44100 * channelNum; ++i) {
       audioBuffer[i] = dis(gen);
     }
     AudioBufferList audioBufferList = {
         .mNumberBuffers = 1,
         .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = sizeof(audioBuffer), .mData = audioBuffer}},
     };
-    status = ExtAudioFileWrite(audioFile, sizeof(audioBuffer) / sizeof(audioBuffer[0]), &audioBufferList);
+    status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);
     if (status) {
       fprintf(stderr, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     }
