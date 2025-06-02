@@ -461,29 +461,53 @@ jobs:
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Compiling encodeme.mm at $(date)"
-          clang++ -g -Os -std=c++11 -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme 2> encodeme_compile.log
-          if [ $? -eq 0 ]; then
+          if [ ! -f encodeme.mm ]; then
+            echo "Error: encodeme.mm not found"
+            ls -l
+            exit 1
+          fi
+          echo "encodeme.mm found, proceeding with compilation"
+          clang++ -g -Os -std=c++11 -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot "$(xcrun --show-sdk-path)" -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme 2> encodeme_compile.log
+          EXIT_STATUS=$?
+          if [ $EXIT_STATUS -eq 0 ]; then
             echo "Compilation succeeded"
             ls -l encodeme
           else
-            echo "Compilation failed"
+            echo "Compilation failed with exit code $EXIT_STATUS"
+            echo "Contents of encodeme_compile.log:"
             cat encodeme_compile.log
+            echo "Listing directory for debugging:"
+            ls -l
             exit 1
           fi
+        env:
+          MD_APPLE_SDK_ROOT: /Applications/Xcode_16.1.app
 
       - name: Compile fuzzer
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Compiling fuzzer.mm at $(date)"
-          clang++ -g -Os -std=c++11 -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --show-sdk-path) -framework AVFAudio -framework AudioToolbox -framework Foundation fuzzer.mm -o fuzzer 2> fuzzer_compile.log
-          if [ $? -eq 0 ]; then
+          if [ ! -f fuzzer.mm ]; then
+            echo "Error: fuzzer.mm not found"
+            ls -l
+            exit 1
+          fi
+          echo "fuzzer.mm found, proceeding with compilation"
+          clang++ -g -Os -std=c++11 -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot "$(xcrun --show-sdk-path)" -framework AVFAudio -framework AudioToolbox -framework Foundation fuzzer.mm -o fuzzer 2> fuzzer_compile.log
+          EXIT_STATUS=$?
+          if [ $EXIT_STATUS -eq 0 ]; then
             echo "Compilation succeeded"
             ls -l fuzzer
           else
-            echo "Compilation failed"
+            echo "Compilation failed with exit code $EXIT_STATUS"
+            echo "Contents of fuzzer_compile.log:"
             cat fuzzer_compile.log
+            echo "Listing directory for debugging:"
+            ls -l
             exit 1
           fi
+        env:
+          MD_APPLE_SDK_ROOT: /Applications/Xcode_16.1.app
 
       - name: Run encodeme with lldb
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
