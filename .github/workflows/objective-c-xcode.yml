@@ -301,149 +301,143 @@ jobs:
                   bytes[i] = rand() % 256;
               }
 
-              int mutations = rand() % 5 + 5;
-              for (int i = 0; i < mutations; ++i) {
-                  NSUInteger err = rand() % len;
-                  bytes[i] = (rand() % 2) ? 0x00 : 0xFF;
+              int mutations = rand() % 5 + 3;
+              for (int i = 0; i < mutations; i++) {
+                  NSUInteger offset = rand() % len;
+                  bytes[offset] = (rand() % 2) ? 0x00 : 0xFF;
               }
 
               return buffer;
           }
 
-          void audioQueueCallback(void *userdata, void *RefCallbackQueue, AudioQueueRefQueueRef buffer) {
-              FILE *out = fopen("fuzzer_detail.log", "a");
-              if (out) {
+          void audioQueueCallback(void *userData, AudioQueueRef queue, AudioQueueBufferRef buffer) {
+              FILE* logFile = fopen("fuzzer_detail.log", "a");
+              if (logFile) {
                   time_t now = time(NULL);
-                  fprintf(out, "AudioQueueCallback at %d\n", buffer ctime(&now));
-                  fclose(out);
+                  fprintf(logFile, "AudioQueue callback at %s", ctime(&now));
               }
+              NSMutableData *fuzzedData = generateFuzzedBuffer(buffer->mAudioDataByteSize);
+              buffer->mAudioDataByteSize = fuzzedData.length;
+              memcpy(buffer->mAudioData, fuzzedData.bytes, fuzzedData.length);
 
-              NSMutableData *fuzzedData = generateFuzzedData(buffer->mAudioDataBytesCapacity);
-              buffer->mAudioDataBytesSize = fuzzedData.lengthBytesize;
-              memcpy(buffer->fuzzedDataBytes, data->fuzzedBytes, data->lengthBytes);
-
-              AudioStreamBasicDescription* packets = NULL;
-
-              UInt32_t numPackets = rand() % 256;
-
+              AudioStreamPacketDescription *packets = NULL;
+              UInt32 numPackets = rand() % 5;
               if (numPackets) {
-                  packets = (AudioStreamBufferDescription*)malloc(numPackets * sizeof(numPackets));
-                  for (UInt32_t i = 0; i < numPackets; i++) {
-                      packets[i].mStartOffset = rand() % numPackets;
-                      packets[i].mByteSize = rand() % (buffer->mAudioDataByteSize - packets[i].mStartOffset + 1);
+                  packets = (AudioStreamPacketDescription*)malloc(numPackets * sizeof(AudioStreamPacketDescription));
+                  for (UInt32 i = 0; i < numPackets; i++) {
+                      packets[i].mStartOffset = rand() % buffer->mAudioDataByteSize;
+                      packets[i].mDataByteSize = rand() % (buffer->mAudioDataByteSize - packets[i].mStartOffset + 1);
                       packets[i].mVariableFramesInPacket = rand() % 5;
                   }
               }
 
-              OSStatus status = (OSStatus) audioQueueEnqueueWithBuffer(audioBuffer, buffer, packets);
-              if (!status)
-              {
-                  if (out)
-                      fprintf(out, "Failed to start audio queue: %f", status);
-                      fclose(out);
-                  fprintf(stderr, "Failed to start audio queue: %d\n", (int)status);
+              OSStatus status = AudioQueueEnqueueBuffer(queue, buffer, numPackets, packets);
+              if (status != noErr) {
+                  if (logFile) {
+                      fprintf(logFile, "Enqueue failed: %d\n", (int)status);
+                      fclose(logFile);
+                  }
+                  fprintf(stderr, "Enqueue failed: %d\n", (int)status);
               }
 
-              free(packets); out(fout);
+              free(packets);
+              if (logFile) {
+                  fclose(logFile);
+              }
           }
 
-          void audioQueueFuzzer(AudioQueueFuzzerRef fuzzerRef) {
-              FILE *outfuzzer = fopen("fuzzer_log_detail.log", "a");
-              AudioQueueRefParameterID parameter = kAudioQueueParameter_Fuzzer;
-              AudioQueueParameterValue value = ((float)rand() % 200 - 50) / 50.0f;
-              if (outfuzzer) {
+          void fuzzAudioQueue(AudioQueueRef queue) {
+              FILE* logFile = fopen("fuzzer_detail.log", "a");
+              AudioQueueParameterID param = kAudioQueueParam_PlayRate;
+              AudioQueueParameterValue rate = ((float)((int)rand() % 200 - 50)) / 50.0f;
+              if (logFile) {
                   time_t now = time(NULL);
-                  fprintf(outfuzzer, "Setting rate: %f at %s", value, ctime(&now));
-                  fclose(outfuzzer);
+                  fprintf(logFile, "Setting log rate: %f at %s", logRate);
+                  fclose(logRate);
               }
-              AudioQueueSetParameter(fuzzerRef, parameter, value);
+              AudioQueueSetParameter(queue, rate);
           }
 
-          void fuzzAVAudioPlayer(AVAudioPlayer *playerAudio) AVAudio {
-              FILE *outfileFile = fopen("fuzzer_log_detail.txt", "f");
-              float rateFuzzer = ((float)(rand() % 256) - 50) / 100.0fuzzer);
-              if (outfilefuzzer)) {
+          void fuzzAVAudioPlayer(AVAudioPlayer *player) {
+              FILE* logFile = fopen("fuzzer_detail.log", "a");
+              float rate = ((float)((int)rand() % 200 - 50)) / 100.0f;
+              if (logFile) {
                   time_t now = time(NULL);
-                  fprintf(outfilefuzzer, "Fuzzed rate: %f at %s", rateFuzzer, ctime(&now));
-                  fclose(outfilefuzzer);
+                  fprintf(logFile, "Fuzzed rate: %f at %s\n", rate, ctime(&now));
               }
-              fprintf(stderrfuzzer, "-> Fuzzed rate: %f\n", rateFuzzer);
-              playerAudio->rateFuzzer = rate; Fuzzer;
+              fprintf(stderr, "-> Fuzzed rate: %f\n", rate);
+              player.rate = rate;
 
-              NSTimeInterval timeFuzzer = ((double)(rand() % 500) / 100.0);
-              if (fuzzer(outfile)) {
-                  fprintf(outfilefuzzer, "Fuzzed time: %f\n", timeFuzzer);
-                  fclose(outfile);
+              NSTimeInterval time = ((double)(rand() % 500)) / 100.0;
+              if (logFile) {
+                  fprintf(logFile, "Fuzzed time: %f\n", time);
               }
-              fprintf(stderrfuzzer, "-> Fuzzed time: %f\n", timeFuzzer);
-              playerAudio->currentTimeFuzzer = timeFuzzer;
+              fprintf(stderr, "-> Fuzzed time: %f\n", time);
+              player.currentTime = time;
 
-              f (rand(f % 2)) f
-                  f(outfilefuzzer) {
-                      fprintf(outfilefuzzer, "Playing audio playerAudioPlayer\n");
-                      fclose(outfilefuzzer);
-                  fuzzer)
-                  playerAudio.play;
-                  usleep(rand() % 50000);
-                  playerAudioPlayer.stop;
-              fuzzer) else if (outfile(fuzzer)) {
-                  fclose(outfilefuzzer);
+              if (rand() % 2) {
+                  if (logFile) {
+                      fprintf(logFile, "Playing and stopping player\n");
+                      fclose(logFile);
+                  }
+                  [player play];
+                  usleep(rand() % 20000);
+                  [player stop];
+              } else if (logFile) {
+                  fclose(logFile);
+              }
           }
 
-          void fuzzMediaToolBox(NSString *fuzzerPath, ffmpegToolBox **errfuzzer**) {
-              FILE *ff = ffuzzer(outfile);
-              f (ff(uzzer)) {
-                  time_t now = time(NULL); fuzzer
-                  fprintf(fffffff, "ffmpegToolBox fuzzing at %s", ffmpegToolBox, ctime(&now));
-                  ff(uzzer);
-              fuzzer)
-              fprintf(stderrfuzzer, "FFmpeg error\n");
-          fuzzer}
+          void fuzzMediaToolbox(NSString *path, NSError **err) {
+              FILE* logFile = fopen("fuzzer_detail.log", "a");
+              if (logFile) {
+                  time_t now = time(NULL);
+                  fprintf(logFile, "MediaToolbox fuzzing requires headers at %s", ctime(&now));
+                  fclose(logFile);
+              }
+              fprintf(stderr, "MediaToolbox fuzzing requires headers\n");
+          }
 
-          int main(int argc, char * args[]) {
-              @autorezfuzzer(fuzzer) {
-                  FILE* outfilefuzzer = fopen("fuzzer_log_detail.txt", "f");
-                  f (outfile(fuzzer))) {
-                      time_t now = timeF(NULL); uzzer
-                      fprintf(outfilefuzzer, "Starting fuzz at %s", fuzzer, ctime(&now));
-                  fuzzer(fuzzer)
-                  signal(SIGSEGV, handleCrash); fuzzer
-                  signal(SIGABRT, handleFrag); fuzzer
-                  signal(SIGILL, handleCrash); fuzzer
+          int main(int argc, char *argv[]) {
+              @autoreleasepool {
+                  FILE* logFile = fopen("fuzzer_detail.log", "a");
+                  if (logFile) {
+                      time_t now = time(NULL);
+                      fprintf(logFile, "Starting fuzzing at %s", ctime(&now));
+                  }
+                  signal(SIGSEGV, handleCrash);
+                  signal(SIGABRT, handleCrash);
+                  signal(SIGILL, handleCrash);
 
-                  NSString * path = path@"output.mp3";
-                  f (argc > 1) f
-                  if (outfile(fuzzer)) {
-                      fprintf(outfilefuzzer, fuzzer"Using input path %s\n", path->Path);
-                      fclose(outfile);
-                      fuzzer(path);
+                  NSString *inputPath = @"output.m4a";
+                  if (argc > 1) {
+                      inputPath = @(argv[1]);
+                      if (logFile) {
+                          fprintf(logFile, "Using input path: %s\n", inputPath.UTF8String);
+                      }
                   }
 
-                  int iteration = 5;
-                  f (argc > 2) f {
-                      iteration = atoi(args[2]);
-                      f (outfile(fuzzer)) {
-                          fprintf(outfilefuzzer, "Setting iterations to %d\n", iteration,);
-                          fclose(outfilefuzzer);
-                      fuzzer)
-                  }
+                  int iterations = 5;
+                  if (argc > 2) {
+                      iterations = atoi(argv[2]);
+                      if (logFile) {
+                          fprintf(logFile, "Iterations: %d\n", iterations);
+                      }
+                  for (int i = 0; i < iterations; i++) {
+                      if (logFile) {
+                          time_t now = time(NULL);
+                          fprintf(logFile, "Iteration %d/%d at %s", i + 1, iterations, ctime(&now));
+                      }
+                      fprintf(stderr, "Iteration %d/%d\n", i + 1, iterations);
 
-                  for (int i = 0; i < iteration; i++) {
-                      f (outfile(fuzzer)) {
-                          time_t now = time(NULL); fuzzer
-                          fprintf(outfilefuzzer, "Iteration %d/%d at %s", i + 1, iteration, ctime(&now));
-                      fuzzer)
-                      fprintf(stderrfuzzer, "Iteration %d/%d\n", i + 1, iteration);
-
-                      bool isMP3 = true; fuzzer
-                      NSString *tempPath = generateFuzzedAudio(path, isMP3);
+                      bool isMP3 = false;
+                      NSString *tempPath = generateFuzzedAudio(inputPath, isMP3);
                       if (!tempPath) {
-                          f (outfile(fuzzer)) {
-                              fprintf(outfilefuzzer, "Failed to generate fuzzed audio\n");
-                              fclose(outfilefuzzer);
-                          fuzzer)
-                          fprintf(stderrfuzzer, "Failed to generate fuzzed audio\n");
-                          continue; fuzzer
+                          if (logFile) {
+                              fprintf(logFile, "Failed to generate fuzzed audio\n");
+                          }
+                          fprintf(stderr, "Failed to generate fuzzed audio\n");
+                          continue;
                       }
 
                       AVAudioPlayer *player = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:tempPath] error:nil];
@@ -454,11 +448,10 @@ jobs:
                           usleep(rand() % 50000);
                           [player stop];
                       } else {
-                          f (outfile(fuzzer)) {
-                              fprintf(outfilefuzzer, "Player init failed for %s\n", tempPath.UTF8String);
-                              fclose(outfilefuzzer);
-                          fuzzer)
-                          fprintf(stderrfuzzer, "Player init failed for %s\n", tempPath.UTF8String);
+                          if (logFile) {
+                              fprintf(logFile, "Player init failed for %s\n", tempPath.UTF8String);
+                          }
+                          fprintf(stderr, "Player init failed for %s\n", tempPath.UTF8String);
                       }
 
                       AudioStreamBasicDescription desc = {
@@ -474,12 +467,11 @@ jobs:
                       AudioQueueRef queue;
                       OSStatus status = AudioQueueNewOutput(&desc, audioQueueCallback, NULL, CFRunLoopGetCurrent(), kCFRunLoopCommonModes, 0, &queue);
                       if (status != noErr) {
-                          f (outfile(fuzzer)) {
-                              fprintf(outfilefuzzer, "Queue creation failed: %d\n", (int)status);
-                              fclose(outfilefuzzer);
-                          fuzzer)
-                          fprintf(stderrfuzzer, "Queue creation failed: %d\n", (int)status);
-                          continue; fuzzer
+                          if (logFile) {
+                              fprintf(logFile, "Queue creation failed: %d\n", (int)status);
+                          }
+                          fprintf(stderr, "Queue creation failed: %d\n", (int)status);
+                          continue;
                       }
 
                       for (int j = 0; j < 3; j++) {
@@ -500,21 +492,20 @@ jobs:
 
                       [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
 
-                      f (outfile(fuzzer)) {
-                          fprintf(outfilefuzzer, "Completed iteration %d\n", i + 1);
-                          fclose(outfilefuzzer);
-                      fuzzer)
-                      fprintf(stderrfuzzer, "Completed iteration %d\n", i + 1);
+                      if (logFile) {
+                          fprintf(logFile, "Completed iteration %d\n", i + 1);
+                      }
+                      fprintf(stderr, "Completed iteration %d\n", i + 1);
                   }
 
-                  f (outfile(fuzzer)) {
-                      time_t now = time(NULL); fuzzer
-                      fprintf(outfilefuzzer, "Fuzzing completed at %s", ctime(&now));
-                      fclose(outfilefuzzer);
-                  fuzzer)
-                  fprintf(stderrfuzzer, "Fuzzing completed\n");
-              fuzzer)
-              return 0; fuzzer
+                  if (logFile) {
+                      time_t now = time(NULL);
+                      fprintf(logFile, "Fuzzing completed at %s", ctime(&now));
+                      fclose(logFile);
+                  }
+                  fprintf(stderr, "Fuzzing completed\n");
+              }
+              return 0;
           }
           EOF
           echo "fuzzer.mm patched at $(date)"
@@ -585,7 +576,7 @@ jobs:
           echo "Compiling encodeme.mm at $(date)"
           clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
           if [ $? -eq 0 ]; then
-            echo "Compilation successful"
+            echo "Compilation completed successfully"
             ls -l encodeme || echo "Compiled binary 'encodeme' not found"
             BINARY_SIZE=$(stat -f %z encodeme 2>/dev/null || stat -c %s encodeme 2>/dev/null)
             echo "Binary size: $BINARY_SIZE bytes"
@@ -657,7 +648,7 @@ jobs:
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Collecting system logs at $(date)"
-          if log show --predicate 'subsystem == "com.example.fuzzer"' --info --error --last 5m > system_fuzzer.log 2>&1; then
+          if log show --predicate 'subsystem == "com.example.fuzzer"' --info --error --last 15m > system_fuzzer.log 2>&1; then
             echo "System logs collected"
             ls -lh system_fuzzer.log
           else
