@@ -126,7 +126,7 @@ NSString* generateFuzzedAudio(NSString* inputPath, bool isMP3) {
             fprintf(logFile, "Error setting format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
             fclose(logFile);
         }
-        fprintf(stderr, "Error setting format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
+        fprintf(stderr, "Error setting format (rate %.0f, format %u): %x\n", status);
         ExtAudioFileDispose(audioFile);
         free(layoutCopy);
         return nil;
