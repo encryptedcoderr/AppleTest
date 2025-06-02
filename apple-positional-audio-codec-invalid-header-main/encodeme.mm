@@ -45,10 +45,10 @@ int main() {
         .mFormatID = formatID,
         .mFormatFlags = (formatID == kAudioFormatLinearPCM) ? kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked : 0,
         .mBytesPerPacket = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : 0,
-        .mFramesPerPacket = (formatID == kAudioFormatMPEG4AAC) ? 1024 : 1,
+        .mFramesPerPacket = static_cast<UInt32>((formatID == kAudioFormatMPEG4AAC) ? 1024 : 1), // Fix narrowing error
         .mBytesPerFrame = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : 0,
         .mChannelsPerFrame = channelNum,
-        .mBitsPerChannel = (formatID == kAudioFormatLinearPCM) ? 32 : 0,
+        .mBitsPerChannel = static_cast<UInt32>((formatID == kAudioFormatLinearPCM) ? 32 : 0), // Fix narrowing error
         .mReserved = 0
     };
 
@@ -102,7 +102,7 @@ int main() {
     }
     AudioBufferList audioBufferList = {
         .mNumberBuffers = 1,
-        .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = sizeof(audioBuffer), .mData = audioBuffer}},
+        .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = static_cast<UInt32>(sizeof(audioBuffer)), .mData = audioBuffer}}, // Fix narrowing error
     };
     status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);
     if (status) {
