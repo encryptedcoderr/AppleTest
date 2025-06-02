@@ -19,7 +19,7 @@ jobs:
           git clone https://github.com/encryptedcoderr/AppleTest/
           cd AppleTest/apple-positional-audio-codec-invalid-header-main
           ls -l
-          echo "Repository cloned"
+          echo "Repository cloned at $(date)"
 
       - name: Patch encodeme.mm
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
@@ -180,7 +180,7 @@ jobs:
             return 0;
           }
           EOF
-          echo "encodeme.mm patched"
+          echo "encodeme.mm patched at $(date)"
 
       - name: Patch fuzzer.mm
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
@@ -279,7 +279,7 @@ jobs:
             }
             memcpy(layoutCopy, channelLayout.layout, layoutSize);
             config.remappingChannelLayout = layoutCopy;
-            fprintf(stderr, "Fuzzer: Allocated channel layout for rate %.0f\n", sampleRate);
+            fprintf(stderr, "Fuzzer: Loaded channel layout for rate %.0f\n", sampleRate);
 
             OverrideApac(&config);
 
@@ -290,7 +290,7 @@ jobs:
             if (logFile) {
               fprintf(logFile, "Creating file: %s\n", tempPath.UTF8String);
             }
-            fprintf(stderr, "Fuzzer: Creating file: %s\n", tempPath.UTF8String);
+            fprintf(stderr, "Fuzzer: Generating file: %s\n", tempPath.UTF8String);
 
             ExtAudioFileRef audioFile = nullptr;
             OSStatus status = ExtAudioFileCreateWithURL((__bridge CFURLRef)outUrl,
@@ -299,7 +299,7 @@ jobs:
                                                        kAudioFileFlags_EraseFile, &audioFile);
             if (status != noErr) {
               if (logFile) fprintf(logFile, "Error creating file (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-              fprintf(stderr, "Error creating file (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
+              fprintf(stderr, "Error creating file (rate %.0f, %.0f): %u\n", sampleRate, formatID, status);
               free(layoutCopy);
               return nil;
             }
@@ -314,7 +314,7 @@ jobs:
                                              sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
             if (status != noErr) {
               if (logFile) fprintf(logFile, "Error setting format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-              fprintf(stderr, "Error setting format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
+              fprintf(stderr, "Error setting format (rate %.0f, %.0f): %u\n", sampleRate, formatID, status);
               ExtAudioFileDispose(audioFile);
               free(layoutCopy);
               return nil;
@@ -324,7 +324,7 @@ jobs:
                                              layoutSize, formatIn.channelLayout.layout);
             if (status != noErr) {
               if (logFile) fprintf(logFile, "Error setting layout (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-              fprintf(stderr, "Error setting layout (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
+              fprintf(stderr, "Error setting layout (rate %.0f, %.0f): %u\n", sampleRate, formatID, status);
               ExtAudioFileDispose(audioFile);
               free(layoutCopy);
               return nil;
@@ -358,7 +358,7 @@ jobs:
             status = ExtAudioFileWrite(audioFile, 1024 + (rand() % 1000), &bufferList);
             if (status != noErr) {
               if (logFile) fprintf(logFile, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-              fprintf(stderr, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
+              fprintf(stderr, "Error writing audio (rate %.0f, %.0f): %u\n", sampleRate, formatID, status);
             }
 
             ExtAudioFileDispose(audioFile);
@@ -408,7 +408,7 @@ jobs:
             return 0;
           }
           EOF
-          echo "fuzzer.mm patched"
+          echo "fuzzer.mm patched at $(date)"
 
       - name: Cache FFmpeg
         uses: actions/cache@v4
@@ -434,10 +434,13 @@ jobs:
 
       - name: Verify Xcode and clang version
         run: |
-          echo "Verifying Xcode and clang versions"
+          echo "Verifying Xcode and clang versions at $(date)"
           xcodebuild -version
-          clang++ -version
+          clang++ --version
           xcrun --show-sdk-path
+          echo "Verification completed at $(date)"
+        env:
+          MD_APPLE_SDK_ROOT: /Applications/Xcode_16.1.app
 
       - name: Verify source files
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
@@ -490,7 +493,7 @@ jobs:
           echo "run" > lldb_commands.txt
           echo "bt" >> lldb_commands.txt
           echo "register read" >> lldb_commands.txt
-          echo "memory read $arg0" >> lldb_commands.txt
+          echo "memory read \$arg0" >> lldb_commands.txt
           echo "exit" >> lldb_commands.txt
           lldb --batch -f ./encodeme -s lldb_commands.txt > encodeme_lldb.log 2>&1
           EXIT_STATUS=$?
@@ -513,7 +516,7 @@ jobs:
           echo "run" > lldb_fuzzer_commands.txt
           echo "bt" >> lldb_fuzzer_commands.txt
           echo "register read" >> lldb_fuzzer_commands.txt
-          echo "memory read $arg0" >> lldb_fuzzer_commands.txt
+          echo "memory read \$arg0" >> lldb_fuzzer_commands.txt
           echo "exit" >> lldb_fuzzer_commands.txt
           for file in output_*.m4a; do
             if [ -f "$file" ]; then
