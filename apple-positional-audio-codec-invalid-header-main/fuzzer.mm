@@ -23,61 +23,75 @@ struct CodecConfig {
 
 void OverrideApac(CodecConfig* config) {
   if (config->remappingChannelLayout) {
-    config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3; // Order 1, 4 channels
+    config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | (rand() % 0x20);
+    fprintf(stderr, "Fuzzer: Set channel layout tag to 0x%x\n", config->remappingChannelLayout->mChannelLayoutTag);
   }
-  config->mRemappingArray.resize(1024, 0xff);
+  config->mRemappingArray.resize(2048 + (rand() % 2048), static_cast<char>(rand() % 256));
 }
 
 NSString* generateFuzzedAudio(NSString* inputPath, bool isMP3, FILE* logFile) {
   if (logFile) {
     time_t now = time(NULL);
-    fprintf(logFile, "Generating fuzzed audio at %s", ctime(&now));
+    fprintf(logFile, "Fuzzing audio at %s", ctime(&now));
   }
-  std::vector<double> sampleRates = {16000, 44100, 48000, 96000};
-  std::vector<AudioFormatID> formats = {kAudioFormatMPEG4AAC, kAudioFormatLinearPCM};
+  std::vector<double> sampleRates = {8000, 16000, 44100, 48000, 96000, 192000}; // Extreme rates
+  std::vector<AudioFormatID> formats = {kAudioFormatMPEG4AAC, kAudioFormatLinearPCM, kAudioFormatMPEG4AAC_HE};
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<> formatDist(0, formats.size() - 1);
   std::uniform_int_distribution<> rateDist(0, sampleRates.size() - 1);
-  std::uniform_real_distribution<float> volumeDis(0.0f, 2.0f); // Fuzz volume for SoftwareVolume
-  std::uniform_int_distribution<> channelFuzz(3, 5); // Fuzz channel count around 4
+  std::uniform_real_distribution<float> volumeDis(-10.0f, 10.0f);
+  std::uniform_int_distribution<> channelFuzz(1, 16); // Wide channel range
 
   double sampleRate = sampleRates[rateDist(gen)];
   AudioFormatID formatID = formats[formatDist(gen)];
-  uint32_t channelNum = channelFuzz(gen); // Fuzz channel count to stress layout handling
+  uint32_t channelNum = channelFuzz(gen);
 
   if (logFile) {
     fprintf(logFile, "Params: sampleRate=%.0f, formatID=%u, channels=%u, isMP3=%d\n", 
             sampleRate, formatID, channelNum, isMP3);
   }
-  fprintf(stderr, "Generating fuzzed audio: sampleRate=%.0f, formatID=%u, channels=%u, isMP3=%d\n", 
+  fprintf(stderr, "Fuzzing: sampleRate=%.0f, formatID=%u, channels=%u, isMP3=%d\n", 
           sampleRate, formatID, channelNum, isMP3);
 
   AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:channelNum];
+  if (!formatIn) {
+    if (logFile) fprintf(logFile, "Failed AVAudioFormat for rate %.0f\n", sampleRate);
+    fprintf(stderr, "Failed AVAudioFormat for rate %.0f\n", sampleRate);
+    return nil;
+  }
+
   AudioStreamBasicDescription outputDesc = {
       .mSampleRate = sampleRate,
       .mFormatID = formatID,
-      .mFormatFlags = (formatID == kAudioFormatLinearPCM) ? kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked : 0,
-      .mBytesPerPacket = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : 0,
-      .mFramesPerPacket = (formatID == kAudioFormatMPEG4AAC) ? 1024 : 1,
-      .mBytesPerFrame = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : 0,
+      .mFormatFlags = (formatID == kAudioFormatLinearPCM) ? kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked : (rand() % 0xFF), // Random flags
+      .mBytesPerPacket = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : (rand() % 100),
+      .mFramesPerPacket = static_cast<UInt32>((formatID == kAudioFormatMPEG4AAC) ? 1024 : (rand() % 2048)),
+      .mBytesPerFrame = (formatID == kAudioFormatLinearPCM) ? 4 * channelNum : (rand() % 100),
       .mChannelsPerFrame = channelNum,
-      .mBitsPerChannel = (formatID == kAudioFormatLinearPCM) ? 32 : 0,
-      .mReserved = 0
+      .mBitsPerChannel = static_cast<UInt32>((formatID == kAudioFormatLinearPCM) ? 32 : (rand() % 64)),
+      .mReserved = rand()
   };
 
-  AVAudioChannelLayout* channelLayout = [[AVAudioChannelLayout alloc] initWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3];
+  AVAudioChannelLayout* channelLayout = [[AVAudioChannelLayout alloc] initWithLayoutTag:kAudioChannelLayoutTag_HOA_ACN_SN3D | (rand() % 0x20)];
+  if (!channelLayout || !channelLayout.layout) {
+    if (logFile) fprintf(logFile, "Failed channel layout for rate %.0f\n", sampleRate);
+    fprintf(stderr, "Failed channel layout for rate %.0f\n", sampleRate);
+    return nil;
+  }
+
   CodecConfig config;
-  AudioChannelLayout* layoutCopy = (AudioChannelLayout*)malloc(sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * channelNum);
+  size_t layoutSize = sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * (channelNum + (rand() % 20));
+  AudioChannelLayout* layoutCopy = (AudioChannelLayout*)calloc(1, layoutSize);
   if (!layoutCopy) {
-    if (logFile) {
-      fprintf(logFile, "Memory allocation failed for rate %.0f\n", sampleRate);
-    }
+    if (logFile) fprintf(logFile, "Memory allocation failed for rate %.0f\n", sampleRate);
     fprintf(stderr, "Memory allocation failed for rate %.0f\n", sampleRate);
     return nil;
   }
-  memcpy(layoutCopy, channelLayout.layout, sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * channelNum);
+  memcpy(layoutCopy, channelLayout.layout, layoutSize);
   config.remappingChannelLayout = layoutCopy;
+  fprintf(stderr, "Fuzzer: Allocated channel layout for rate %.0f\n", sampleRate);
+
   OverrideApac(&config);
 
   NSString* fileName = [NSString stringWithFormat:@"fuzzed_%.0f_%u_%u.%@", sampleRate, formatID, channelNum, isMP3 ? @"mp3" : @"m4a"];
@@ -85,30 +99,33 @@ NSString* generateFuzzedAudio(NSString* inputPath, bool isMP3, FILE* logFile) {
   NSURL* outUrl = [NSURL fileURLWithPath:tempPath];
 
   if (logFile) {
-    fprintf(logFile, "Creating file at path: %s\n", tempPath.UTF8String);
+    fprintf(logFile, "Creating file: %s\n", tempPath.UTF8String);
   }
-  fprintf(stderr, "Creating file at path: %s\n", tempPath.UTF8String);
+  fprintf(stderr, "Fuzzer: Creating file: %s\n", tempPath.UTF8String);
 
   ExtAudioFileRef audioFile = nullptr;
   OSStatus status = ExtAudioFileCreateWithURL((__bridge CFURLRef)outUrl,
                                              isMP3 ? kAudioFileMP3Type : kAudioFileM4AType,
                                              &outputDesc, config.remappingChannelLayout,
                                              kAudioFileFlags_EraseFile, &audioFile);
-  if (status) {
-    if (logFile) {
-      fprintf(logFile, "Error creating file (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-    }
+  if (status != noErr) {
+    if (logFile) fprintf(logFile, "Error creating file (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     fprintf(stderr, "Error creating file (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     free(layoutCopy);
     return nil;
   }
 
+  // Malformed metadata
+  NSDictionary *metadata = @{
+    @"com.apple.metadata.spatial" : @(rand() % 0xFFFF),
+    @"channel_layout" : @(rand() % 0xFFFF)
+  };
+  AudioFileSetProperty(audioFile, kAudioFilePropertyInfoDictionary, sizeof(metadata), &metadata);
+
   status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientDataFormat,
                                    sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
-  if (status) {
-    if (logFile) {
-      fprintf(logFile, "Error setting format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-    }
+  if (status != noErr) {
+    if (logFile) fprintf(logFile, "Error setting format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     fprintf(stderr, "Error setting format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     ExtAudioFileDispose(audioFile);
     free(layoutCopy);
@@ -116,46 +133,50 @@ NSString* generateFuzzedAudio(NSString* inputPath, bool isMP3, FILE* logFile) {
   }
 
   status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientChannelLayout,
-                                   sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * channelNum, formatIn.channelLayout.layout);
-  if (status) {
-    if (logFile) {
-      fprintf(logFile, "Error setting layout (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-    }
+                                   layoutSize, formatIn.channelLayout.layout);
+  if (status != noErr) {
+    if (logFile) fprintf(logFile, "Error setting layout (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     fprintf(stderr, "Error setting layout (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     ExtAudioFileDispose(audioFile);
     free(layoutCopy);
     return nil;
   }
 
-  // Fuzz audio buffer with extreme values to stress FigRenderPipeline
-  float audioBuffer[1024 * channelNum];
-  std::uniform_real_distribution<float> dis(-2.0f, 2.0f); // Exceed normal range
-  for (int i = 0; i < 1024 * channelNum; ++i) {
+  float* audioBuffer = new float[1024 * channelNum];
+  if (!audioBuffer) {
+    if (logFile) fprintf(logFile, "Failed to allocate audio buffer for rate %.0f\n", sampleRate);
+    fprintf(stderr, "Failed to allocate audio buffer for rate %.0f\n", sampleRate);
+    ExtAudioFileDispose(audioFile);
+    free(layoutCopy);
+    return nil;
+  }
+  std::uniform_real_distribution<float> dis(-100.0f, 100.0f);
+  for (size_t i = 0; i < 1024 * channelNum; ++i) {
     audioBuffer[i] = dis(gen);
-    if (rand() % 100 < 5) { // 5% chance of extreme values
-      audioBuffer[i] = (rand() % 2) ? std::numeric_limits<float>::infinity() : -std::numeric_limits<float>::infinity();
+    if (rand() % 100 < 20) {
+      audioBuffer[i] = (rand() % 2) ? std::numeric_limits<float>::infinity() : std::numeric_limits<float>::quiet_NaN();
     }
   }
-  // Apply fuzzed volume scaling
   float volumeFactor = volumeDis(gen);
-  for (int i = 0; i < 1024 * channelNum; ++i) {
+  for (size_t i = 0; i < 1024 * channelNum; ++i) {
     audioBuffer[i] *= volumeFactor;
   }
+  fprintf(stderr, "Fuzzer: Filled audio buffer for rate %.0f\n", sampleRate);
 
   AudioBufferList bufferList = {
-      .mNumberBuffers = 1,
-      .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = sizeof(audioBuffer), .mData = audioBuffer}}
+      .mNumberBuffers = 1 + (rand() % 3), // Multiple buffers
+      .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = static_cast<UInt32>(1024 * channelNum * sizeof(float) + (rand() % 2000)), .mData = audioBuffer}}
   };
-  status = ExtAudioFileWrite(audioFile, 1024, &bufferList);
-  if (status) {
-    if (logFile) {
-      fprintf(logFile, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
-    }
+  status = ExtAudioFileWrite(audioFile, 1024 + (rand() % 1000), &bufferList);
+  if (status != noErr) {
+    if (logFile) fprintf(logFile, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     fprintf(stderr, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
   }
 
   ExtAudioFileDispose(audioFile);
+  delete[] audioBuffer;
   free(layoutCopy);
+  fprintf(stderr, "Fuzzer: Completed processing for rate %.0f\n", sampleRate);
   return tempPath;
 }
 
@@ -170,48 +191,23 @@ int main(int argc, char *argv[]) {
     NSString *inputPath = @"output_44100_1635013121.m4a";
     if (argc > 1) {
       inputPath = @(argv[1]);
-      if (logFile) {
-        fprintf(logFile, "Using input path: %s\n", inputPath.UTF8String);
-      }
+      if (logFile) fprintf(logFile, "Input path: %s\n", inputPath.UTF8String);
     }
 
-    int iterations = 5;
+    int iterations = 20; // More iterations
     if (argc > 2) {
       iterations = atoi(argv[2]);
-      if (logFile) {
-        fprintf(logFile, "Setting iterations: %d\n", iterations);
-      }
+      if (logFile) fprintf(logFile, "Iterations: %d\n", iterations);
     }
 
     for (int i = 0; i < iterations; i++) {
-      if (logFile) {
-        time_t now = time(NULL);
-        fprintf(logFile, "Iteration %d/%d at %s", i + 1, iterations, ctime(&now));
-      }
-      fprintf(stderr, "Iteration %d/%d\n", i + 1, iterations);
+      if (logFile) fprintf(logFile, "Iteration %d/%d\n", i + 1, iterations);
+      fprintf(stderr, "Fuzzer: Iteration %d/%d\n", i + 1, iterations);
 
-      // Generate fuzzed .m4a
       NSString *tempPathM4A = generateFuzzedAudio(inputPath, false, logFile);
-      if (!tempPathM4A) {
-        if (logFile) {
-          fprintf(logFile, "Failed to generate fuzzed .m4a\n");
-        }
-        fprintf(stderr, "Failed to generate fuzzed .m4a\n");
-      }
-
-      // Generate fuzzed .mp3
       NSString *tempPathMP3 = generateFuzzedAudio(inputPath, true, logFile);
-      if (!tempPathMP3) {
-        if (logFile) {
-          fprintf(logFile, "Failed to generate fuzzed .mp3\n");
-        }
-        fprintf(stderr, "Failed to generate fuzzed .mp3\n");
-      }
 
-      if (logFile) {
-        fprintf(logFile, "Completed iteration %d\n", i + 1);
-      }
-      fprintf(stderr, "Completed iteration %d\n", i + 1);
+      if (logFile) fprintf(logFile, "Completed iteration %d\n", i + 1);
     }
 
     if (logFile) {
