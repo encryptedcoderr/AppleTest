@@ -572,13 +572,13 @@ jobs:
           echo "File verification completed at $(date)"
 
       # Compile encodeme.mm for macOS
-      - name: Compile encodeme.mm
+      - name: Compile encodeme
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Compiling encodeme.mm at $(date)"
           clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
-          if [ $? -eq 0 ]; then
-            echo "Compilation successful"
+          if [ $? -eq 0" ]; then
+            echo "Compilation completed successfully"
             ls -l encodeme || echo "Compiled binary 'encodeme' not found"
             BINARY_SIZE=$(stat -f %z encodeme 2>/dev/null || stat -c %s encodeme 2>/dev/null)
             echo "Binary size: $BINARY_SIZE bytes"
@@ -588,7 +588,7 @@ jobs:
           fi
 
       # Compile fuzzer.mm for macOS
-      - name: Compile fuzzer.mm
+      - name: Compile fuzzer
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Compiling fuzzer.mm at $(date)"
@@ -645,17 +645,18 @@ jobs:
           fi
           ls -lh fuzzer.log fuzzer_detail.log fuzzer_crash.log 2>/dev/null || echo "One or more log files not found"
 
-      # Collect system logs (fallback to fuzzer logs)
+      # Collect system logs
       - name: Collect system logs
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Collecting system logs at $(date)"
-          if log show --predicate 'subsystem == "com.example.fuzzer"' --info --error --last 15m > system_fuzzer.log 2>&1; then
-            echo "System logs collected"
+          if log show --predicate '(subsystem == "com.apple.CrashReporter") OR (eventType == "error" OR eventType == "fault") OR (eventMessage CONTAINS[c] "crash")' --info --error --last 15m > system_fuzzer.log 2>&1; then
+            echo "System logs collected successfully"
             ls -lh system_fuzzer.log
           else
             echo "Failed to collect system logs, relying on fuzzer logs"
             echo "System log collection failed at $(date)" > system_fuzzer.log
+            ls -lh system_fuzzer.log
           fi
           for log in fuzzer_detail.log fuzzer_crash.log; do
             if [ -f "$log" ]; then
@@ -671,7 +672,7 @@ jobs:
         run: |
           echo "Collecting crash reports at $(date)"
           mkdir -p crash_reports
-          cp ~/Library/Logs/DiagnosticReports/fuzzer*.crash crash_reports/ 2>/dev/null || echo "No crash reports found"
+          cp -r ~/Library/Logs/DiagnosticReports/*.crash crash_reports/ 2>/dev/null || echo "No crash reports found"
           ls -lh crash_reports/ 2>/dev/null || echo "No crash reports copied"
 
       # Verify generated files
@@ -681,7 +682,7 @@ jobs:
           echo "Checking for generated files at $(date)"
           for file in output.m4a output.mp3; do
             if [ -f "$file" ]; then
-              FILE_SIZE=$(stat -f %z "$file" 2>/dev/null || stat -c %s "$file" 2>/dev/null)
+              FILE_SIZE=$(stat -f %z "$file" 2>/dev/null || stat -c %s "$file")
               echo "$file size: $FILE_SIZE bytes"
               if [ "$FILE_SIZE" -eq 0 ]; then
                 echo "Error: $file is 0 bytes"
