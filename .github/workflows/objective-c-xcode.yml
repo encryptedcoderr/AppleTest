@@ -390,4 +390,332 @@ jobs:
                   fclose(outfilefuzzer);
           }
 
-          void fuzzMedia
+          void fuzzMediaToolBox(NSString *fuzzerPath, ffmpegToolBox **errfuzzer**) {
+              FILE *ff = ffuzzer(outfile);
+              f (ff(uzzer)) {
+                  time_t now = time(NULL); fuzzer
+                  fprintf(fffffff, "ffmpegToolBox fuzzing at %s", ffmpegToolBox, ctime(&now));
+                  ff(uzzer);
+              fuzzer)
+              fprintf(stderrfuzzer, "FFmpeg error\n");
+          fuzzer}
+
+          int main(int argc, char * args[]) {
+              @autorezfuzzer(fuzzer) {
+                  FILE* outfilefuzzer = fopen("fuzzer_log_detail.txt", "f");
+                  f (outfile(fuzzer))) {
+                      time_t now = timeF(NULL); uzzer
+                      fprintf(outfilefuzzer, "Starting fuzz at %s", fuzzer, ctime(&now));
+                  fuzzer(fuzzer)
+                  signal(SIGSEGV, handleCrash); fuzzer
+                  signal(SIGABRT, handleFrag); fuzzer
+                  signal(SIGILL, handleCrash); fuzzer
+
+                  NSString * path = path@"output.mp3";
+                  f (argc > 1) f
+                  if (outfile(fuzzer)) {
+                      fprintf(outfilefuzzer, fuzzer"Using input path %s\n", path->Path);
+                      fclose(outfile);
+                      fuzzer(path);
+                  }
+
+                  int iteration = 5;
+                  f (argc > 2) f {
+                      iteration = atoi(args[2]);
+                      f (outfile(fuzzer)) {
+                          fprintf(outfilefuzzer, "Setting iterations to %d\n", iteration,);
+                          fclose(outfilefuzzer);
+                      fuzzer)
+                  }
+
+                  for (int i = 0; i < iteration; i++) {
+                      f (outfile(fuzzer)) {
+                          time_t now = time(NULL); fuzzer
+                          fprintf(outfilefuzzer, "Iteration %d/%d at %s", i + 1, iteration, ctime(&now));
+                      fuzzer)
+                      fprintf(stderrfuzzer, "Iteration %d/%d\n", i + 1, iteration);
+
+                      bool isMP3 = true; fuzzer
+                      NSString *tempPath = generateFuzzedAudio(path, isMP3);
+                      if (!tempPath) {
+                          f (outfile(fuzzer)) {
+                              fprintf(outfilefuzzer, "Failed to generate fuzzed audio\n");
+                              fclose(outfilefuzzer);
+                          fuzzer)
+                          fprintf(stderrfuzzer, "Failed to generate fuzzed audio\n");
+                          continue; fuzzer
+                      }
+
+                      AVAudioPlayer *player = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:tempPath] error:nil];
+                      if (player) {
+                          player.enableRate = YES;
+                          fuzzAVAudioPlayer(player);
+                          [player play];
+                          usleep(rand() % 50000);
+                          [player stop];
+                      } else {
+                          f (outfile(fuzzer)) {
+                              fprintf(outfilefuzzer, "Player init failed for %s\n", tempPath.UTF8String);
+                              fclose(outfilefuzzer);
+                          fuzzer)
+                          fprintf(stderrfuzzer, "Player init failed for %s\n", tempPath.UTF8String);
+                      }
+
+                      AudioStreamBasicDescription desc = {
+                          .mSampleRate = 44100,
+                          .mFormatID = kAudioFormatLinearPCM,
+                          .mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+                          .mBitsPerChannel = 16,
+                          .mChannelsPerFrame = 1,
+                          .mFramesPerPacket = 1,
+                          .mBytesPerFrame = 2,
+                          .mBytesPerPacket = 2
+                      };
+                      AudioQueueRef queue;
+                      OSStatus status = AudioQueueNewOutput(&desc, audioQueueCallback, NULL, CFRunLoopGetCurrent(), kCFRunLoopCommonModes, 0, &queue);
+                      if (status != noErr) {
+                          f (outfile(fuzzer)) {
+                              fprintf(outfilefuzzer, "Queue creation failed: %d\n", (int)status);
+                              fclose(outfilefuzzer);
+                          fuzzer)
+                          fprintf(stderrfuzzer, "Queue creation failed: %d\n", (int)status);
+                          continue; fuzzer
+                      }
+
+                      for (int j = 0; j < 3; j++) {
+                          AudioQueueBufferRef buffer;
+                          UInt32 size = rand() % 100000 + 500;
+                          if (AudioQueueAllocateBuffer(queue, size, &buffer) == noErr) {
+                              audioQueueCallback(NULL, queue, buffer);
+                          }
+                      }
+
+                      fuzzAudioQueue(queue);
+                      AudioQueueStart(queue, NULL);
+                      usleep(rand() % 50000);
+                      AudioQueueStop(queue, true);
+                      AudioQueueDispose(queue, true);
+
+                      fuzzMediaToolbox(tempPath, nil);
+
+                      [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+
+                      f (outfile(fuzzer)) {
+                          fprintf(outfilefuzzer, "Completed iteration %d\n", i + 1);
+                          fclose(outfilefuzzer);
+                      fuzzer)
+                      fprintf(stderrfuzzer, "Completed iteration %d\n", i + 1);
+                  }
+
+                  f (outfile(fuzzer)) {
+                      time_t now = time(NULL); fuzzer
+                      fprintf(outfilefuzzer, "Fuzzing completed at %s", ctime(&now));
+                      fclose(outfilefuzzer);
+                  fuzzer)
+                  fprintf(stderrfuzzer, "Fuzzing completed\n");
+              fuzzer)
+              return 0; fuzzer
+          }
+          EOF
+          echo "fuzzer.mm patched at $(date)"
+
+      # Cache FFmpeg to speed up installation
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/ffmpeg
+          key: ffmpeg-${{ runner.os }}-2025-06
+          restore-keys: ffmpeg-${{ runner.os }}-
+
+      # Install FFmpeg if not cached
+      - name: Install FFmpeg
+        run: |
+          echo "Installing FFmpeg at $(date)"
+          if ! command -v ffmpeg &> /dev/null; then
+            brew install ffmpeg
+          else
+            echo "FFmpeg already installed"
+          fi
+          echo "FFmpeg installed at $(date)"
+
+      # Set up Xcode
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.1'
+
+      # Verify Xcode and clang version
+      - name: Verify Xcode and clang version
+        run: |
+          echo "Verifying Xcode and clang versions at $(date)"
+          xcodebuild -version
+          clang++ --version
+          xcrun --sdk macosx --show-sdk-path
+          echo "Verification completed at $(date)"
+
+      # Check system resources
+      - name: Check system resources
+        run: |
+          echo "Checking system resources at $(date)"
+          df -h
+          system_profiler SPHardwareDataType
+          echo "System resource check completed at $(date)"
+
+      # Verify source files
+      - name: Verify source files
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Verifying files at $(date)"
+          for file in encodeme.mm fuzzer.mm; do
+            if [ -f "$file" ]; then
+              echo "$file found"
+              ls -l "$file"
+            else
+              echo "$file not found"
+              ls -l
+              exit 1
+            fi
+          done
+          echo "File verification completed at $(date)"
+
+      # Compile encodeme.mm for macOS
+      - name: Compile encodeme.mm
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Compiling encodeme.mm at $(date)"
+          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme.mm -o encodeme
+          if [ $? -eq 0 ]; then
+            echo "Compilation successful"
+            ls -l encodeme || echo "Compiled binary 'encodeme' not found"
+            BINARY_SIZE=$(stat -f %z encodeme 2>/dev/null || stat -c %s encodeme 2>/dev/null)
+            echo "Binary size: $BINARY_SIZE bytes"
+          else
+            echo "Compilation failed"
+            exit 1
+          fi
+
+      # Compile fuzzer.mm for macOS
+      - name: Compile fuzzer.mm
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Compiling fuzzer.mm at $(date)"
+          clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox -framework Foundation fuzzer.mm -o fuzzer
+          if [ $? -eq 0 ]; then
+            echo "Compilation successful"
+            ls -l fuzzer || echo "Compiled binary 'fuzzer' not found"
+            BINARY_SIZE=$(stat -f %z fuzzer 2>/dev/null || stat -c %s fuzzer 2>/dev/null)
+            echo "Binary size: $BINARY_SIZE bytes"
+          else
+            echo "Compilation failed"
+            exit 1
+          fi
+
+      # Run encodeme to generate output.m4a
+      - name: Run encodeme
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Running encodeme at $(date)"
+          chmod +x encodeme
+          ./encodeme
+          if [ $? -eq 0 ]; then
+            echo "encodeme executed successfully"
+          else
+            echo "encodeme execution failed"
+            exit 1
+          fi
+
+      # Convert M4A to MP3
+      - name: Convert M4A to MP3
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Converting output.m4a to output.mp3 at $(date)"
+          ffmpeg -i output.m4a -c:a mp3 -b:a 128k -ac 1 output.mp3
+          if [ $? -eq 0 ]; then
+            echo "Conversion successful"
+          else
+            echo "Conversion failed"
+            exit 1
+          fi
+
+      # Run fuzzer with output.m4a as input
+      - name: Run fuzzer
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Running fuzzer at $(date)"
+          chmod +x fuzzer
+          ./fuzzer output.m4a 5 > fuzzer.log 2>&1 || true
+          if [ $? -eq 0 ]; then
+            echo "fuzzer executed successfully"
+          else
+            echo "fuzzer execution failed"
+            cat fuzzer.log
+          fi
+          ls -lh fuzzer.log fuzzer_detail.log fuzzer_crash.log 2>/dev/null || echo "One or more log files not found"
+
+      # Collect system logs (fallback to fuzzer logs)
+      - name: Collect system logs
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Collecting system logs at $(date)"
+          if log show --predicate 'subsystem == "com.example.fuzzer"' --info --error --last 5m > system_fuzzer.log 2>&1; then
+            echo "System logs collected"
+            ls -lh system_fuzzer.log
+          else
+            echo "Failed to collect system logs, relying on fuzzer logs"
+            echo "System log collection failed at $(date)" > system_fuzzer.log
+          fi
+          for log in fuzzer_detail.log fuzzer_crash.log; do
+            if [ -f "$log" ]; then
+              echo "$log found, size: $(stat -f %z "$log" 2>/dev/null || stat -c %s "$log" 2>/dev/null) bytes"
+            else
+              echo "$log not found"
+            fi
+          done
+
+      # Collect crash reports
+      - name: Collect crash reports
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Collecting crash reports at $(date)"
+          mkdir -p crash_reports
+          cp ~/Library/Logs/DiagnosticReports/fuzzer*.crash crash_reports/ 2>/dev/null || echo "No crash reports found"
+          ls -lh crash_reports/ 2>/dev/null || echo "No crash reports copied"
+
+      # Verify generated files
+      - name: Verify generated files
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Checking for generated files at $(date)"
+          for file in output.m4a output.mp3; do
+            if [ -f "$file" ]; then
+              FILE_SIZE=$(stat -f %z "$file" 2>/dev/null || stat -c %s "$file" 2>/dev/null)
+              echo "$file size: $FILE_SIZE bytes"
+              if [ "$FILE_SIZE" -eq 0 ]; then
+                echo "Error: $file is 0 bytes"
+                exit 1
+              fi
+              ffprobe -i "$file" -show_format -show_streams -print_format json 2>/dev/null || echo "ffprobe failed for $file"
+            else
+              echo "$file not found"
+              exit 1
+            fi
+          done
+          echo "Checking for fuzzed files at $(date)"
+          ls -lh /tmp/fuzzed_* 2>/dev/null || echo "No fuzzed files found"
+
+      # Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-and-log-files
+          path: |
+            AppleTest/apple-positional-audio-codec-invalid-header-main/output.m4a
+            AppleTest/apple-positional-audio-codec-invalid-header-main/output.mp3
+            AppleTest/apple-positional-audio-codec-invalid-header-main/fuzzer.log
+            AppleTest/apple-positional-audio-codec-invalid-header-main/fuzzer_detail.log
+            AppleTest/apple-positional-audio-codec-invalid-header-main/fuzzer_crash.log
+            AppleTest/apple-positional-audio-codec-invalid-header-main/system_fuzzer.log
+            AppleTest/apple-positional-audio-codec-invalid-header-main/crash_reports/*.crash
+            /tmp/fuzzed_*.m4a
+          retention-days: 7
+          if-no-files-found: warn
