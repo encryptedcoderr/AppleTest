@@ -527,12 +527,15 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16.1'
+
+      # Verify Xcode and clang version
+      - name: Verify Xcode and clang version
         run: |
-          echo "Setting up Xcode at $(date)"
+          echo "Verifying Xcode and clang versions at $(date)"
           xcodebuild -version
           clang++ --version
           xcrun --sdk macosx --show-sdk-path
-          echo "Xcode setup and verification completed at $(date)"
+          echo "Verification completed at $(date)"
 
       # Check system resources
       - name: Check system resources
@@ -645,7 +648,6 @@ jobs:
             echo "Failed to collect system logs, relying on fuzzer logs"
             echo "System log collection failed at $(date)" > system_fuzzer.log
           fi
-          # Copy fuzzer-generated logs
           for log in fuzzer_detail.log fuzzer_crash.log; do
             if [ -f "$log" ]; then
               echo "$log found, size: $(stat -f %z "$log" 2>/dev/null || stat -c %s "$log" 2>/dev/null) bytes"
