@@ -3,6 +3,7 @@
 #include <vector>
 #include <random>
 #include <stdio.h>
+#include <time.h>
 
 struct CodecConfig {
   char padding0[0x78];
@@ -20,15 +21,15 @@ struct CodecConfig {
 
 void OverrideApac(CodecConfig* config) {
   if (config->remappingChannelLayout) {
-    // Intentionally set invalid channel layout tag for fuzzing
     config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | (rand() % 0x10);
     fprintf(stderr, "Set channel layout tag to 0x%x\n", config->remappingChannelLayout->mChannelLayoutTag);
   }
-  config->mRemappingArray.resize(1024 + (rand() % 1024), 0xff); // Oversized array
+  config->mRemappingArray.resize(1024 + (rand() % 1024), 0xff);
 }
 
 int main() {
-  fprintf(stderr, "Starting encodeme at %s", ctime(&time(nullptr)));
+  time_t now = time(nullptr);
+  fprintf(stderr, "Starting encodeme at %s", ctime(&now));
   std::vector<double> sampleRates = {16000, 44100, 48000, 96000};
   std::vector<AudioFormatID> formats = {kAudioFormatMPEG4AAC, kAudioFormatLinearPCM};
   std::random_device rd;
@@ -42,7 +43,7 @@ int main() {
       fprintf(stderr, "Skipping unsupported sample rate %.0f for AAC\n", sampleRate);
       continue;
     }
-    uint32_t channelNum = 4 + (rand() % 8); // Random channels (4–11) for fuzzing
+    uint32_t channelNum = 4 + (rand() % 8);
     AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:channelNum];
     if (!formatIn) {
       fprintf(stderr, "Failed to create AVAudioFormat for rate %.0f\n", sampleRate);
@@ -68,13 +69,13 @@ int main() {
     }
 
     CodecConfig config;
-    size_t layoutSize = sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * (channelNum + (rand() % 10)); // Oversized layout
+    size_t layoutSize = sizeof(AudioChannelLayout) + sizeof(AudioChannelDescription) * (channelNum + (rand() % 10));
     AudioChannelLayout* channelLayoutCopy = (AudioChannelLayout*)calloc(1, layoutSize);
     if (!channelLayoutCopy) {
       fprintf(stderr, "Memory allocation failed for channel layout, rate %.0f\n", sampleRate);
       continue;
     }
-    memcpy(channelLayoutCopy, channelLayout.layout, layoutSize); // Potential overflow
+    memcpy(channelLayoutCopy, channelLayout.layout, layoutSize);
     config.remappingChannelLayout = channelLayoutCopy;
     fprintf(stderr, "Allocated and copied channel layout for rate %.0f\n", sampleRate);
 
@@ -93,10 +94,6 @@ int main() {
       free(channelLayoutCopy);
       continue;
     }
-
-    // Add malformed metadata
-    NSDictionary *metadata = @{@"com.apple.metadata.spatial" : @(rand() % 0xFFFF)};
-    AudioFileSetProperty(audioFile, kAudioFilePropertyInfoDictionary, sizeof(metadata), &metadata);
 
     status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientDataFormat,
                                      sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
@@ -127,14 +124,14 @@ int main() {
     for (size_t i = 0; i < 44100 * channelNum; ++i) {
       audioBuffer[i] = dis(gen);
       if (rand() % 100 < 10) {
-        audioBuffer[i] = std::numeric_limits<float>::infinity(); // Invalid samples
+        audioBuffer[i] = std::numeric_limits<float>::infinity();
       }
     }
     fprintf(stderr, "Filled audio buffer for rate %.0f\n", sampleRate);
 
     AudioBufferList audioBufferList = {
         .mNumberBuffers = 1,
-        .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000)), .mData = audioBuffer}}, // Oversized buffer
+        .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float) + (rand() % 1000)), .mData = audioBuffer}},
     };
     status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);
     if (status != noErr) {
@@ -150,6 +147,7 @@ int main() {
     free(channelLayoutCopy);
     fprintf(stderr, "Completed processing for rate %.0f\n", sampleRate);
   }
-  fprintf(stderr, "encodeme completed at %s", ctime(&time(nullptr)));
+  now = time(nullptr);
+  fprintf(stderr, "encodeme completed at %s", ctime(&now));
   return 0;
 }
