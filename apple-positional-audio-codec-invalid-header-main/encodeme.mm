@@ -21,10 +21,10 @@ struct CodecConfig {
 
 void OverrideApac(CodecConfig* config) {
   if (config->remappingChannelLayout) {
-    config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | (rand() % 0x10);
+    config->remappingChannelLayout->mChannelLayoutTag = kAudioChannelLayoutTag_HOA_ACN_SN3D | 0x2;
     fprintf(stderr, "Set channel layout tag to 0x%x\n", config->remappingChannelLayout->mChannelLayoutTag);
   }
-  config->mRemappingArray.resize(1024 + (rand() % 1024), 0xff);
+  config->mRemappingArray.resize(1024, 0xff);
 }
 
 int main() {
@@ -36,7 +36,18 @@ int main() {
   uint32_t channelNum = 2; // Stereo
   fprintf(stderr, "Processing sample rate %.0f, format %u\n", sampleRate, formatID);
 
-  AVAudioFormat* formatIn = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:channelNum];
+  AudioStreamBasicDescription inputDescription = {
+      .mSampleRate = sampleRate,
+      .mFormatID = kAudioFormatLinearPCM,
+      .mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+      .mBytesPerPacket = 4 * channelNum,
+      .mFramesPerPacket = 1,
+      .mBytesPerFrame = 4 * channelNum,
+      .mChannelsPerFrame = channelNum,
+      .mBitsPerChannel = 32,
+      .mReserved = 0
+  };
+  AVAudioFormat* formatIn = [[AVAudioFormat alloc] initWithStreamDescription:&inputDescription];
   if (!formatIn) {
     fprintf(stderr, "Failed to create AVAudioFormat for rate %.0f\n", sampleRate);
     return 1;
@@ -88,7 +99,7 @@ int main() {
   }
 
   status = ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientDataFormat,
-                                   sizeof(AudioStreamBasicDescription), formatIn.streamDescription);
+                                   sizeof(AudioStreamBasicDescription), &inputDescription);
   if (status != noErr) {
     fprintf(stderr, "Error setting client data format (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
     ExtAudioFileDispose(audioFile);
