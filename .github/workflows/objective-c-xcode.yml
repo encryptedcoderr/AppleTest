@@ -13,13 +13,25 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # Clone repository
+      # Clone repository and debug structure
       - name: Clone repository
         run: |
           echo "Cloning repository at $(date)"
           git clone https://github.com/encryptedcoderr/AppleTest/
-          cd AppleTest/audio-pcm-maintenance-code
-          echo "Listing directory contents at $(date)"
+          echo "Listing AppleTest directory contents at $(date)"
+          ls -R AppleTest || echo "AppleTest directory is empty"
+          # Try to find the correct subdirectory
+          if [ -d "AppleTest/audio-pcm-maintenance-code" ]; then
+            echo "Found audio-pcm-maintenance-code directory"
+            cd AppleTest/audio-pcm-maintenance-code
+          elif [ -d "AppleTest/apple-positional-audio-codec-invalid-header-main" ]; then
+            echo "Found apple-positional-audio-codec-invalid-header-main directory"
+            cd AppleTest/apple-positional-audio-codec-invalid-header-main
+          else
+            echo "No specific subdirectory found, using AppleTest root"
+            cd AppleTest
+          fi
+          echo "Current working directory: $(pwd)"
           ls -l
           echo "Repository cloned and directory listed at $(date)"
 
@@ -31,7 +43,6 @@ jobs:
 
       # Create generate_pocs.swift
       - name: Create generate_pocs.swift
-        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Creating generate_pocs.swift at $(date)"
           cat << 'EOF' > generate_pocs.swift
@@ -133,7 +144,6 @@ jobs:
 
       # Create manipulate_pocs.swift
       - name: Create manipulate_pocs.swift
-        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Creating manipulate_pocs.swift at $(date)"
           rm -f manipulate_pocs.swift
@@ -309,7 +319,7 @@ jobs:
               writer.startSession(atSourceTime: .zero)
               var sampleBuffer: CMSampleBuffer?
               let audioBuffer = buffer.audioBufferList.pointee.mBuffers
-              guard let mData = audioBuffer.mData else {
+              guard let mData = buffer.audioBufferList.pointee.mBuffers.mData else {
                   throw NSError(domain: "AudioBufferData", code: -7, userInfo: [NSLocalizedDescriptionKey: "PCM buffer mData is nil before creating CMBlockBuffer"])
               }
               var blockBuffer: CMBlockBuffer?
@@ -452,7 +462,6 @@ jobs:
 
       # Create PoC source files
       - name: Create PoC source files
-        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Creating PoC source files at $(date)"
           cp encodeme.mm encodeme_poc1.mm
@@ -479,7 +488,6 @@ jobs:
 
       # Generate base M4A files
       - name: Generate base M4A files
-        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Generating base M4A files at $(date)"
           swift generate_pocs.swift
@@ -488,7 +496,6 @@ jobs:
 
       # Manipulate M4A and generate MP3 files
       - name: Manipulate M4A and generate MP3 files
-        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Manipulating M4A and generating MP3 files at $(date)"
           swift manipulate_pocs.swift
@@ -497,7 +504,6 @@ jobs:
 
       # Verify generated files
       - name: Verify generated files
-        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Checking for generated files at $(date)"
           for poc in {1..5}; do
@@ -523,8 +529,8 @@ jobs:
         with:
           name: poc-audio-files
           path: |
-            AppleTest/audio-pcm-maintenance-code/poc*.m4a
-            AppleTest/audio-pcm-maintenance-code/poc*.mp3
-            AppleTest/audio-pcm-maintenance-code/encodeme_poc*.mm
+            poc*.m4a
+            poc*.mp3
+            encodeme_poc*.mm
           retention-days: 7
           if-no-files-found: error
