@@ -13,12 +13,12 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # Clone the repository
+      # Clone repository
       - name: Clone repository
         run: |
           echo "Cloning repository at $(date)"
           git clone https://github.com/encryptedcoderr/AppleTest/
-          cd AppleTest/apple-positional-audio-codec-invalid-header-main
+          cd AppleTest/audio-pcm-maintenance-code
           echo "Listing directory contents at $(date)"
           ls -l
           echo "Repository cloned and directory listed at $(date)"
@@ -31,7 +31,7 @@ jobs:
 
       # Create generate_pocs.swift
       - name: Create generate_pocs.swift
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Creating generate_pocs.swift at $(date)"
           cat << 'EOF' > generate_pocs.swift
@@ -133,10 +133,10 @@ jobs:
 
       # Create manipulate_pocs.swift
       - name: Create manipulate_pocs.swift
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Creating manipulate_pocs.swift at $(date)"
-          rm -f manipulate_pocs.swift # Force remove any existing file
+          rm -f manipulate_pocs.swift
           cat << 'EOF' > manipulate_pocs.swift
           import Foundation
           import AVFoundation
@@ -281,11 +281,8 @@ jobs:
               } else {
                   if let floatData = buffer.floatChannelData {
                       for channelIdx in 0..<Int(pcmFormat.channelCount) {
-                          if let channelPtr = floatData[channelIdx] {
-                              memset(channelPtr, 0, Int(frameCount) * MemoryLayout<Float>.size)
-                          } else {
-                              throw NSError(domain: "AudioBuffer", code: -3, userInfo: [NSLocalizedDescriptionKey: "PCM buffer floatChannelData[\(channelIdx)] is nil for non-interleaved silenced fill."])
-                          }
+                          let channelPtr = floatData[channelIdx]
+                          memset(channelPtr, 0, Int(frameCount) * MemoryLayout<Float>.size)
                       }
                   } else {
                       throw NSError(domain: "AudioBuffer", code: -4, userInfo: [NSLocalizedDescriptionKey: "PCM buffer floatChannelData is nil for non-interleaved silenced fill."])
@@ -293,7 +290,7 @@ jobs:
               }
               let bitrate = pocNumber == 4 ? 320000 : 128000
               let outputSettings: [String: Any] = [
-                  AVFormatIDKey: kAudioFormatMPEG3,
+                  AVFormatIDKey: kAudioFormatMPEGLayer3,
                   AVSampleRateKey: sampleRate,
                   AVNumberOfChannelsKey: channels,
                   AVEncoderBitRateKey: bitrate,
@@ -328,7 +325,7 @@ jobs:
               guard status == kCMBlockBufferNoErr, let createdBlockBuffer = blockBuffer else {
                   throw NSError(domain: "CMBlockBuffer", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Failed to create CMBlockBuffer. OSStatus: \(status)"])
               }
-              var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: AVAudioRate(sampleRate)),
+              var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: Int32(sampleRate)),
                                              presentationTimeStamp: .zero,
                                              decodeTimeStamp: .invalid)
               status = CMSampleBufferCreate(allocator: kCFAllocatorDefault,
@@ -455,7 +452,7 @@ jobs:
 
       # Create PoC source files
       - name: Create PoC source files
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Creating PoC source files at $(date)"
           cp encodeme.mm encodeme_poc1.mm
@@ -482,7 +479,7 @@ jobs:
 
       # Generate base M4A files
       - name: Generate base M4A files
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Generating base M4A files at $(date)"
           swift generate_pocs.swift
@@ -491,7 +488,7 @@ jobs:
 
       # Manipulate M4A and generate MP3 files
       - name: Manipulate M4A and generate MP3 files
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Manipulating M4A and generating MP3 files at $(date)"
           swift manipulate_pocs.swift
@@ -500,7 +497,7 @@ jobs:
 
       # Verify generated files
       - name: Verify generated files
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        working-directory: AppleTest/audio-pcm-maintenance-code
         run: |
           echo "Checking for generated files at $(date)"
           for poc in {1..5}; do
@@ -526,8 +523,8 @@ jobs:
         with:
           name: poc-audio-files
           path: |
-            AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.m4a
-            AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.mp3
-            AppleTest/apple-positional-audio-codec-invalid-header-main/encodeme_poc*.mm
+            AppleTest/audio-pcm-maintenance-code/poc*.m4a
+            AppleTest/audio-pcm-maintenance-code/poc*.mp3
+            AppleTest/audio-pcm-maintenance-code/encodeme_poc*.mm
           retention-days: 7
           if-no-files-found: error
