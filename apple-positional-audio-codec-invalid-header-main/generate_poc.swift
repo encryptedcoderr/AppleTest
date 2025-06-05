@@ -1,10 +1,11 @@
 import AVFoundation
 import Foundation
+import CoreMedia
 
 func generateBaseM4A(filename: String, duration: Double, channels: Int, sampleRate: Double) throws {
     let outputURL = URL(fileURLWithPath: filename)
     
-    // Create a silent audio buffer
+    // Create audio format for PCM input
     let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
     let frameCount = UInt32(duration * sampleRate)
     let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
@@ -17,7 +18,7 @@ func generateBaseM4A(filename: String, duration: Double, channels: Int, sampleRa
         }
     }
     
-    // Create an AVAssetWriter
+    // Create AVAssetWriter
     let writer = try AVAssetWriter(outputURL: outputURL, fileType: .m4a)
     let settings: [String: Any] = [
         AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -28,10 +29,54 @@ func generateBaseM4A(filename: String, duration: Double, channels: Int, sampleRa
     let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
     writer.add(audioInput)
     
+    // Start writing
     writer.startWriting()
     writer.startSession(atSourceTime: .zero)
     
-    audioInput.append(buffer)
+    // Convert AVAudioPCMBuffer to CMSampleBuffer
+    var formatDesc: CMAudioFormatDescription?
+    let asbd = format.streamDescription
+    CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                  asbd: asbd,
+                                  layoutSize: 0,
+                                  layout: nil,
+                                  magicCookieSize: 0,
+                                  magicCookie: nil,
+                                  extensions: nil,
+                                  formatDescriptionOut: &formatDesc)
+    
+    var sampleBuffer: CMSampleBuffer?
+    let blockBufferLength = Int(frameCount) * Int(format.channelCount) * MemoryLayout<Float>.size
+    var blockBuffer: CMBlockBuffer?
+    CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault,
+                                      memoryBlock: buffer.floatChannelData![0],
+                                      blockLength: blockBufferLength,
+                                      blockAllocator: kCFAllocatorNull,
+                                      customBlockSource: nil,
+                                      offsetToData: 0,
+                                      dataLength: blockBufferLength,
+                                      flags: 0,
+                                      blockBufferOut: &blockBuffer)
+    
+    let timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: Int32(sampleRate)),
+                                   presentationTimeStamp: .zero,
+                                   decodeTimeStamp: .invalid)
+    
+    CMSampleBufferCreate(allocator: kCFAllocatorDefault,
+                        dataBuffer: blockBuffer,
+                        dataReady: true,
+                        makeDataReadyCallback: nil,
+                        refcon: nil,
+                        formatDescription: formatDesc,
+                        sampleCount: CMItemCount(frameCount),
+                        sampleTimingEntryCount: 1,
+                        sampleTimingArray: [timing],
+                        sampleSizeEntryCount: 0,
+                        sampleSizeArray: nil,
+                        sampleBufferOut: &sampleBuffer)
+    
+    // Append to writer
+    audioInput.append(sampleBuffer!)
     audioInput.markAsFinished()
     writer.finishWriting {
         print("Generated \(filename)")
