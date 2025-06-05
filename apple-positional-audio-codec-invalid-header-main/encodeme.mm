@@ -34,7 +34,8 @@ int main() {
   double sampleRate = 44100;
   AudioFormatID formatID = kAudioFormatMPEG4AAC;
   uint32_t channelNum = 2; // Stereo
-  fprintf(stderr, "Processing sample rate %.0f, format %u\n", sampleRate, formatID);
+  fprintf(stderr, "Processing sample rate %.0f, format %u (%c%c%c%c)\n", sampleRate, formatID,
+          (formatID >> 24) & 0xFF, (formatID >> 16) & 0xFF, (formatID >> 8) & 0xFF, formatID & 0xFF);
 
   AudioStreamBasicDescription inputDescription = {
       .mSampleRate = sampleRate,
@@ -55,7 +56,7 @@ int main() {
 
   AudioStreamBasicDescription outputDescription = {
       .mSampleRate = sampleRate,
-      .mFormatID = formatID,
+      .mFormatID = kAudioFormatMPEG4AAC,
       .mFormatFlags = 0,
       .mBytesPerPacket = 0,
       .mFramesPerPacket = 1024,
@@ -64,6 +65,9 @@ int main() {
       .mBitsPerChannel = 0,
       .mReserved = 0
   };
+  fprintf(stderr, "Output format ID: %u (%c%c%c%c)\n", outputDescription.mFormatID,
+          (outputDescription.mFormatID >> 24) & 0xFF, (outputDescription.mFormatID >> 16) & 0xFF,
+          (outputDescription.mFormatID >> 8) & 0xFF, outputDescription.mFormatID & 0xFF);
 
   AVAudioChannelLayout* channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_Stereo];
   if (!channelLayout || !channelLayout.layout) {
@@ -135,6 +139,7 @@ int main() {
       .mNumberBuffers = 1,
       .mBuffers = {{.mNumberChannels = channelNum, .mDataByteSize = static_cast<UInt32>(44100 * channelNum * sizeof(float)), .mData = audioBuffer}},
   };
+  fprintf(stderr, "Writing %u frames with buffer size %u bytes\n", 44100, audioBufferList.mBuffers[0].mDataByteSize);
   status = ExtAudioFileWrite(audioFile, 44100, &audioBufferList);
   if (status != noErr) {
     fprintf(stderr, "Error writing audio (rate %.0f, format %u): %x\n", sampleRate, formatID, status);
